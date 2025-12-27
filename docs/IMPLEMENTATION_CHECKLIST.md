@@ -157,7 +157,7 @@ tests/test_models.py
 src/resume_customizer/server.py
 src/resume_customizer/mcp/__init__.py
 src/resume_customizer/mcp/tools.py
-src/resume_customizer/mcp/handlers.py
+src/resume_customizer/mcp/handlers.pygit 
 tests/__init__.py
 tests/conftest.py
 pytest.ini
@@ -184,31 +184,31 @@ pytest.ini
 **Status**: ⬜ Not Started
 
 ### 2.1 Skill Matching Algorithm ✅
-- [ ] Create `core/matcher.py`
-- [ ] Implement `SkillMatcher` class
-- [ ] Create `config/skill_synonyms.yaml`
-  - [ ] Add common programming language synonyms
-  - [ ] Add framework synonyms
-  - [ ] Add tool synonyms
-  - [ ] Add domain keyword synonyms
-- [ ] Implement skill normalization
-  - [ ] Case-insensitive matching
-  - [ ] Whitespace normalization
-  - [ ] Synonym matching
-- [ ] Implement fuzzy matching for similar skills
-- [ ] Implement skill hierarchy (React → JavaScript)
-- [ ] Calculate required skills match
-- [ ] Calculate preferred skills match
-- [ ] Identify missing required skills
-- [ ] Identify missing preferred skills
-- [ ] Write unit tests
-  - [ ] Test exact matches
-  - [ ] Test case insensitive
-  - [ ] Test synonym matching
-  - [ ] Test skill hierarchy
-  - [ ] Test missing skills detection
-- [ ] Test: Matches "Python" with "python", "Python3"
-- [ ] Test: Score is reproducible
+- [x] Create `core/matcher.py`
+- [x] Implement `SkillMatcher` class
+- [x] Create `config/skill_synonyms.yaml`
+  - [x] Add common programming language synonyms
+  - [x] Add framework synonyms
+  - [x] Add tool synonyms
+  - [x] Add domain keyword synonyms
+- [x] Implement skill normalization
+  - [x] Case-insensitive matching
+  - [x] Whitespace normalization
+  - [x] Synonym matching
+- [x] Implement fuzzy matching for similar skills
+- [x] Implement skill hierarchy (React → JavaScript)
+- [x] Calculate required skills match
+- [x] Calculate preferred skills match
+- [x] Identify missing required skills
+- [x] Identify missing preferred skills
+- [x] Write unit tests
+  - [x] Test exact matches
+  - [x] Test case insensitive
+  - [x] Test synonym matching
+  - [x] Test skill hierarchy
+  - [x] Test missing skills detection
+- [x] Test: Matches "Python" with "python", "Python3"
+- [x] Test: Score is reproducible
 
 **Files to Create**:
 ```
@@ -218,27 +218,27 @@ tests/test_matcher.py
 ```
 
 ### 2.2 Achievement Ranking System ✅
-- [ ] Install spaCy model: `python -m spacy download en_core_web_sm`
-- [ ] Implement keyword extraction
-  - [ ] Extract nouns and verbs
-  - [ ] Extract technical terms
-  - [ ] Identify metrics and numbers
-  - [ ] Extract action verbs
-- [ ] Implement `rank_achievements()` function
-  - [ ] Calculate keyword overlap score
-  - [ ] Calculate technology match score
-  - [ ] Calculate metrics presence bonus
-  - [ ] Calculate recency bonus
-  - [ ] Combine scores with weights
-- [ ] Sort achievements by relevance
-- [ ] Write unit tests
-  - [ ] Test keyword extraction
-  - [ ] Test technology matching
-  - [ ] Test metrics bonus
-  - [ ] Test recency bonus
-  - [ ] Test ranking consistency
-- [ ] Test: Achievements with matching tech score higher
-- [ ] Test: Ranking is explainable
+- [x] Install spaCy model: `python -m spacy download en_core_web_sm`
+- [x] Implement keyword extraction
+  - [x] Extract nouns and verbs
+  - [x] Extract technical terms
+  - [x] Identify metrics and numbers
+  - [x] Extract action verbs
+- [x] Implement `rank_achievements()` function
+  - [x] Calculate keyword overlap score
+  - [x] Calculate technology match score
+  - [x] Calculate metrics presence bonus
+  - [x] Calculate recency bonus (Note: skipped - Achievement model has no year field)
+  - [x] Combine scores with weights
+- [x] Sort achievements by relevance
+- [x] Write unit tests
+  - [x] Test keyword extraction
+  - [x] Test technology matching
+  - [x] Test metrics bonus
+  - [x] Test recency bonus (Note: skipped - Achievement model has no year field)
+  - [x] Test ranking consistency
+- [x] Test: Achievements with matching tech score higher
+- [x] Test: Ranking is explainable
 
 **Add to**: `src/resume_customizer/core/matcher.py`
 

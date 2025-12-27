@@ -1,0 +1,429 @@
+# Skill Synonyms Configuration
+# This file defines synonyms and hierarchies for skills to improve matching accuracy
+
+# Programming Languages
+programming_languages:
+  python:
+    - python
+    - python3
+    - py
+    - python2
+  javascript:
+    - javascript
+    - js
+    - ecmascript
+    - es6
+    - es2015
+    - es2016
+    - es2017
+    - es2018
+    - es2019
+    - es2020
+  typescript:
+    - typescript
+    - ts
+  java:
+    - java
+    - java8
+    - java11
+    - java17
+    - jdk
+  csharp:
+    - c#
+    - csharp
+    - .net
+    - dotnet
+  cpp:
+    - c++
+    - cpp
+    - cplusplus
+  c:
+    - c
+  go:
+    - go
+    - golang
+  rust:
+    - rust
+  ruby:
+    - ruby
+    - rb
+  php:
+    - php
+  swift:
+    - swift
+  kotlin:
+    - kotlin
+  scala:
+    - scala
+  r:
+    - r
+    - r-lang
+  sql:
+    - sql
+    - t-sql
+    - pl/sql
+    - mysql
+    - postgresql
+    - postgres
+
+# Frontend Frameworks & Libraries
+frontend:
+  react:
+    - react
+    - reactjs
+    - react.js
+  vue:
+    - vue
+    - vuejs
+    - vue.js
+  angular:
+    - angular
+    - angularjs
+    - angular2
+    - angular4
+    - angular8
+  svelte:
+    - svelte
+  next:
+    - next
+    - nextjs
+    - next.js
+  nuxt:
+    - nuxt
+    - nuxtjs
+    - nuxt.js
+  gatsby:
+    - gatsby
+    - gatsbyjs
+  redux:
+    - redux
+    - react-redux
+  jquery:
+    - jquery
+  bootstrap:
+    - bootstrap
+    - twitter bootstrap
+  tailwind:
+    - tailwind
+    - tailwindcss
+    - tailwind css
+
+# Backend Frameworks
+backend:
+  django:
+    - django
+  flask:
+    - flask
+  fastapi:
+    - fastapi
+    - fast api
+  express:
+    - express
+    - expressjs
+    - express.js
+  nodejs:
+    - node
+    - nodejs
+    - node.js
+  spring:
+    - spring
+    - spring boot
+    - springboot
+  rails:
+    - rails
+    - ruby on rails
+    - ror
+  laravel:
+    - laravel
+  asp_net:
+    - asp.net
+    - asp
+    - aspnet
+
+# Databases
+databases:
+  postgresql:
+    - postgresql
+    - postgres
+    - psql
+  mysql:
+    - mysql
+  mongodb:
+    - mongodb
+    - mongo
+  redis:
+    - redis
+  elasticsearch:
+    - elasticsearch
+    - elastic search
+    - elastic
+  dynamodb:
+    - dynamodb
+    - dynamo
+  cassandra:
+    - cassandra
+  sqlite:
+    - sqlite
+    - sqlite3
+  oracle:
+    - oracle
+    - oracle db
+  mssql:
+    - mssql
+    - sql server
+    - microsoft sql server
+
+# Cloud Platforms
+cloud:
+  aws:
+    - aws
+    - amazon web services
+  azure:
+    - azure
+    - microsoft azure
+  gcp:
+    - gcp
+    - google cloud
+    - google cloud platform
+  heroku:
+    - heroku
+  digitalocean:
+    - digitalocean
+    - digital ocean
+
+# DevOps & Tools
+devops:
+  docker:
+    - docker
+    - containerization
+  kubernetes:
+    - kubernetes
+    - k8s
+  jenkins:
+    - jenkins
+  gitlab_ci:
+    - gitlab ci
+    - gitlab-ci
+    - gitlab ci/cd
+  github_actions:
+    - github actions
+    - github-actions
+  terraform:
+    - terraform
+  ansible:
+    - ansible
+  chef:
+    - chef
+  puppet:
+    - puppet
+  ci_cd:
+    - ci/cd
+    - ci-cd
+    - cicd
+    - continuous integration
+    - continuous deployment
+
+# Version Control
+version_control:
+  git:
+    - git
+    - github
+    - gitlab
+    - bitbucket
+  svn:
+    - svn
+    - subversion
+
+# Testing Frameworks
+testing:
+  pytest:
+    - pytest
+    - py.test
+  jest:
+    - jest
+  mocha:
+    - mocha
+  jasmine:
+    - jasmine
+  selenium:
+    - selenium
+    - webdriver
+  cypress:
+    - cypress
+  junit:
+    - junit
+  testng:
+    - testng
+
+# Machine Learning & AI
+ml_ai:
+  tensorflow:
+    - tensorflow
+    - tf
+  pytorch:
+    - pytorch
+    - torch
+  keras:
+    - keras
+  scikit_learn:
+    - scikit-learn
+    - sklearn
+    - scikit learn
+  pandas:
+    - pandas
+  numpy:
+    - numpy
+  opencv:
+    - opencv
+    - cv2
+  nlp:
+    - nlp
+    - natural language processing
+  computer_vision:
+    - computer vision
+    - cv
+  deep_learning:
+    - deep learning
+    - dl
+  machine_learning:
+    - machine learning
+    - ml
+
+# Data Science
+data_science:
+  jupyter:
+    - jupyter
+    - jupyter notebook
+  matplotlib:
+    - matplotlib
+  seaborn:
+    - seaborn
+  plotly:
+    - plotly
+  tableau:
+    - tableau
+  power_bi:
+    - power bi
+    - powerbi
+  apache_spark:
+    - spark
+    - apache spark
+    - pyspark
+
+# Mobile Development
+mobile:
+  react_native:
+    - react native
+    - react-native
+  flutter:
+    - flutter
+  swift:
+    - swift
+    - ios
+  kotlin:
+    - kotlin
+    - android
+  xamarin:
+    - xamarin
+
+# Design & UI/UX
+design:
+  figma:
+    - figma
+  sketch:
+    - sketch
+  adobe_xd:
+    - adobe xd
+    - xd
+  photoshop:
+    - photoshop
+    - ps
+  illustrator:
+    - illustrator
+    - ai
+  ui_ux:
+    - ui/ux
+    - ui
+    - ux
+    - user experience
+    - user interface
+
+# Methodologies
+methodologies:
+  agile:
+    - agile
+    - scrum
+    - kanban
+  tdd:
+    - tdd
+    - test driven development
+  bdd:
+    - bdd
+    - behavior driven development
+  microservices:
+    - microservices
+    - micro services
+  rest:
+    - rest
+    - restful
+    - rest api
+  graphql:
+    - graphql
+    - graph ql
+
+# Skill Hierarchies
+# If user has a child skill, they implicitly have the parent skill
+hierarchies:
+  - parent: javascript
+    children:
+      - react
+      - vue
+      - angular
+      - nodejs
+      - express
+      - next
+      - nuxt
+  - parent: python
+    children:
+      - django
+      - flask
+      - fastapi
+      - pytest
+      - pandas
+      - numpy
+      - tensorflow
+      - pytorch
+  - parent: java
+    children:
+      - spring
+      - junit
+  - parent: sql
+    children:
+      - postgresql
+      - mysql
+      - mssql
+      - oracle
+  - parent: cloud
+    children:
+      - aws
+      - azure
+      - gcp
+  - parent: devops
+    children:
+      - docker
+      - kubernetes
+      - jenkins
+      - terraform
+      - ansible
+  - parent: machine_learning
+    children:
+      - tensorflow
+      - pytorch
+      - keras
+      - scikit_learn
+  - parent: testing
+    children:
+      - pytest
+      - jest
+      - selenium
+      - cypress
