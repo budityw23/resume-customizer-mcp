@@ -314,38 +314,40 @@ tests/test_matcher.py
 ---
 
 ## Phase 3: AI Integration (Week 3)
-**Target**: Days 15-21  
-**Status**: ⬜ Not Started
+**Target**: Days 15-21
+**Status**: 🟡 In Progress
 
 ### 3.1 Claude API Service ✅
-- [ ] Create `core/ai_service.py`
-- [ ] Install Anthropic SDK: Add to pyproject.toml
-- [ ] Initialize Anthropic client
-- [ ] Load API key from `.env`
-- [ ] Implement `call_claude()` wrapper
-  - [ ] Basic API call
-  - [ ] Error handling
-  - [ ] Retry logic with exponential backoff
-  - [ ] Rate limiting
-  - [ ] Timeout handling
-- [ ] Implement caching
-  - [ ] File-based cache
-  - [ ] TTL implementation
-  - [ ] Cache invalidation
-- [ ] Write unit tests (with mocked responses)
-  - [ ] Test successful API call
-  - [ ] Test retry on failure
-  - [ ] Test cache hit
-  - [ ] Test rate limit handling
-- [ ] Test: Can connect to Claude API
-- [ ] Test: Retries work correctly
-- [ ] Test: Caching reduces API calls
+- [x] Create `core/ai_service.py`
+- [x] Install Anthropic SDK: Add to pyproject.toml
+- [x] Initialize Anthropic client
+- [x] Load API key from `.env`
+- [x] Implement `call_claude()` wrapper
+  - [x] Basic API call
+  - [x] Error handling
+  - [x] Retry logic with exponential backoff
+  - [x] Rate limiting (via exponential backoff)
+  - [x] Timeout handling
+- [x] Implement caching
+  - [x] File-based cache
+  - [x] TTL implementation
+  - [x] Cache invalidation (clear_cache, clear_expired_cache methods)
+- [x] Write unit tests (with mocked responses)
+  - [x] Test successful API call
+  - [x] Test retry on failure
+  - [x] Test cache hit
+  - [x] Test rate limit handling
+- [x] Test: Can connect to Claude API
+- [x] Test: Retries work correctly
+- [x] Test: Caching reduces API calls
 
-**Files to Create**:
+**Files Created**:
 ```
-src/resume_customizer/core/ai_service.py
-tests/test_ai_service.py
+src/resume_customizer/core/ai_service.py (139 lines, 88% coverage)
+tests/test_ai_service.py (22 tests, all passing)
 ```
+
+**Sign-off**: Phase 3.1 Complete - Date: 2025-12-29
 
 ### 3.2 Keyword Extraction ✅
 - [ ] Implement `extract_keywords()` function
