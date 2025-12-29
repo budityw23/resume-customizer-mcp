@@ -102,7 +102,7 @@ class AIService:
         self,
         prompt: str,
         system_prompt: str | None = None,
-        model: str = "claude-3-5-sonnet-20241022",
+        model: str = "claude-sonnet-4-20250514",
         max_tokens: int = 4096,
         temperature: float = 1.0,
         use_cache: bool = True,
@@ -408,7 +408,7 @@ Only return the JSON object, no other text."""
             response = self.call_claude(
                 prompt=prompt,
                 system_prompt=system_prompt,
-                model="claude-3-5-sonnet-20241022",
+                model="claude-sonnet-4-20250514",
                 max_tokens=2048,
                 temperature=0.3,  # Lower temperature for more consistent extraction
                 use_cache=use_cache,
@@ -724,7 +724,7 @@ Remember:
             response = self.call_claude(
                 prompt=prompt,
                 system_prompt=system_prompt,
-                model="claude-3-5-sonnet-20241022",
+                model="claude-sonnet-4-20250514",
                 max_tokens=1024,
                 temperature=0.5,  # Moderate creativity for rephrasing
                 use_cache=use_cache,
@@ -975,7 +975,7 @@ Only return the JSON object, no other text."""
             response = self.call_claude(
                 prompt=prompt,
                 system_prompt=system_prompt,
-                model="claude-3-5-sonnet-20241022",
+                model="claude-sonnet-4-20250514",
                 max_tokens=512,
                 temperature=0.7,  # Higher creativity for compelling summaries
                 use_cache=use_cache,

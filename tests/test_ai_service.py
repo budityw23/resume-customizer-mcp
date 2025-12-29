@@ -81,7 +81,7 @@ class TestCallClaude:
         """Test that cached responses are returned without API call."""
         # Create a cache entry
         cache_key = service._generate_cache_key(
-            "Test prompt", "Test system", "claude-3-5-sonnet-20241022", 1.0
+            "Test prompt", "Test system", "claude-sonnet-4-20250514", 1.0
         )
         cache_file = tmp_path / f"{cache_key}.json"
         cache_data = {"timestamp": datetime.now().isoformat(), "response": "Cached response"}
@@ -102,7 +102,7 @@ class TestCallClaude:
         """Test that expired cache is ignored and API is called."""
         # Create an expired cache entry
         cache_key = service._generate_cache_key(
-            "Test prompt", "Test system", "claude-3-5-sonnet-20241022", 1.0
+            "Test prompt", "Test system", "claude-sonnet-4-20250514", 1.0
         )
         cache_file = tmp_path / f"{cache_key}.json"
         expired_time = datetime.now() - timedelta(hours=25)

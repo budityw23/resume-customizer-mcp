@@ -71,6 +71,7 @@ examples/output/*.docx
 
 # Cache
 cache/
+.cache/
 *.cache
 
 # Logs
