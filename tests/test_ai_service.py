@@ -353,6 +353,285 @@ class TestCaching:
         assert not expired_cache.exists()
 
 
+class TestKeywordExtraction:
+    """Test keyword extraction functionality."""
+
+    @pytest.fixture
+    def service(self, tmp_path):
+        """Create AI service with mocked client."""
+        with patch("resume_customizer.core.ai_service.Anthropic"):
+            return AIService(api_key="test-key", cache_dir=tmp_path)
+
+    def test_extract_keywords_success(self, service):
+        """Test successful keyword extraction from Claude API."""
+        # Mock Claude response with valid JSON
+        mock_json_response = json.dumps({
+            "technical_skills": [
+                {"keyword": "Python", "weight": 0.9},
+                {"keyword": "Docker", "weight": 0.8}
+            ],
+            "domain_knowledge": [
+                {"keyword": "Machine Learning", "weight": 0.7}
+            ],
+            "soft_skills": [
+                {"keyword": "leadership", "weight": 0.6}
+            ],
+            "action_verbs": ["delivered", "built", "led"],
+            "metrics": ["5+ years", "100% uptime"]
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            keywords = service.extract_keywords("Test job description with Python")
+
+            assert len(keywords["technical_skills"]) == 2
+            assert keywords["technical_skills"][0]["keyword"] == "Python"
+            assert keywords["technical_skills"][0]["weight"] == 0.9
+            assert len(keywords["action_verbs"]) == 3
+            assert "delivered" in keywords["action_verbs"]
+
+    def test_extract_keywords_with_extra_text(self, service):
+        """Test keyword extraction when Claude includes extra text around JSON."""
+        # Mock response with text before/after JSON
+        mock_response = """Here are the extracted keywords:
+
+{
+  "technical_skills": [{"keyword": "JavaScript", "weight": 0.85}],
+  "domain_knowledge": [],
+  "soft_skills": [],
+  "action_verbs": ["developed"],
+  "metrics": []
+}
+
+Hope this helps!"""
+
+        with patch.object(service, "call_claude", return_value=mock_response):
+            keywords = service.extract_keywords("Test text")
+
+            assert len(keywords["technical_skills"]) == 1
+            assert keywords["technical_skills"][0]["keyword"] == "JavaScript"
+
+    def test_extract_keywords_string_format_conversion(self, service):
+        """Test that string keywords are converted to dict format."""
+        # Mock response with string keywords instead of dicts
+        mock_json_response = json.dumps({
+            "technical_skills": ["Python", "Docker"],  # Strings instead of dicts
+            "domain_knowledge": [{"keyword": "FinTech", "weight": 0.7}],
+            "soft_skills": [],
+            "action_verbs": [],
+            "metrics": []
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            keywords = service.extract_keywords("Test text")
+
+            # Should convert strings to dicts with default weight
+            assert keywords["technical_skills"][0]["keyword"] == "Python"
+            assert keywords["technical_skills"][0]["weight"] == 0.5
+
+    def test_extract_keywords_missing_fields(self, service):
+        """Test handling of incomplete JSON response."""
+        # Mock response missing some fields
+        mock_json_response = json.dumps({
+            "technical_skills": [{"keyword": "Python", "weight": 0.9}],
+            # Missing other required fields
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            with pytest.raises(AIServiceError):
+                service.extract_keywords("Test text", use_fallback=False)
+
+    def test_extract_keywords_invalid_json(self, service):
+        """Test handling of invalid JSON response."""
+        with patch.object(service, "call_claude", return_value="Not valid JSON"):
+            with pytest.raises(AIServiceError):
+                service.extract_keywords("Test text", use_fallback=False)
+
+    def test_extract_keywords_caching(self, service):
+        """Test that keyword extraction uses caching."""
+        mock_json_response = json.dumps({
+            "technical_skills": [],
+            "domain_knowledge": [],
+            "soft_skills": [],
+            "action_verbs": [],
+            "metrics": []
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response) as mock_call:
+            # First call
+            service.extract_keywords("Test text", use_cache=True)
+            # Second call with same text
+            service.extract_keywords("Test text", use_cache=True)
+
+            # call_claude should be called twice (it handles its own caching)
+            assert mock_call.call_count == 2
+            # Verify use_cache parameter is passed
+            assert mock_call.call_args.kwargs["use_cache"] is True
+
+    @patch("resume_customizer.core.ai_service.SPACY_AVAILABLE", True)
+    def test_extract_keywords_fallback_to_spacy(self, service):
+        """Test fallback to spaCy when Claude API fails."""
+        # Mock Claude API to fail
+        with patch.object(
+            service, "call_claude", side_effect=AIServiceError("API failed")
+        ):
+            # Mock spaCy extraction
+            with patch.object(
+                service,
+                "_extract_keywords_spacy",
+                return_value={
+                    "technical_skills": [{"keyword": "Python", "weight": 0.6}],
+                    "domain_knowledge": [],
+                    "soft_skills": [],
+                    "action_verbs": ["develop"],
+                    "metrics": []
+                }
+            ) as mock_spacy:
+                keywords = service.extract_keywords("Test text", use_fallback=True)
+
+                # Should call spaCy fallback
+                mock_spacy.assert_called_once()
+                assert len(keywords["technical_skills"]) == 1
+
+    def test_extract_keywords_no_fallback(self, service):
+        """Test that extraction fails without fallback when API fails."""
+        with patch.object(
+            service, "call_claude", side_effect=AIServiceError("API failed")
+        ):
+            with pytest.raises(AIServiceError, match="Keyword extraction failed"):
+                service.extract_keywords("Test text", use_fallback=False)
+
+
+class TestSpacyFallback:
+    """Test spaCy fallback functionality."""
+
+    @pytest.fixture
+    def service(self, tmp_path):
+        """Create AI service."""
+        with patch("resume_customizer.core.ai_service.Anthropic"):
+            return AIService(api_key="test-key", cache_dir=tmp_path)
+
+    @patch("resume_customizer.core.ai_service.SPACY_AVAILABLE", True)
+    @patch("resume_customizer.core.ai_service.spacy")
+    def test_spacy_extraction_basic(self, mock_spacy_module, service):
+        """Test basic spaCy extraction functionality."""
+        # Mock spaCy model and document
+        mock_nlp = Mock()
+        mock_doc = Mock()
+
+        # Mock tokens
+        mock_token = Mock()
+        mock_token.pos_ = "NOUN"
+        mock_token.text = "Python"
+        mock_token.is_stop = False
+        mock_token.lemma_ = "develop"
+
+        mock_doc.__iter__ = Mock(return_value=iter([mock_token]))
+        mock_doc.noun_chunks = []
+        mock_doc.ents = []
+
+        mock_nlp.return_value = mock_doc
+        mock_spacy_module.load.return_value = mock_nlp
+
+        keywords = service._extract_keywords_spacy("Test text with Python")
+
+        assert "technical_skills" in keywords
+        assert "domain_knowledge" in keywords
+        assert "soft_skills" in keywords
+        assert "action_verbs" in keywords
+        assert "metrics" in keywords
+
+    @patch("resume_customizer.core.ai_service.SPACY_AVAILABLE", False)
+    def test_spacy_not_available(self, service):
+        """Test error when spaCy is not available."""
+        with pytest.raises(AIServiceError, match="spaCy not available"):
+            service._extract_keywords_spacy("Test text")
+
+    @patch("resume_customizer.core.ai_service.SPACY_AVAILABLE", True)
+    @patch("resume_customizer.core.ai_service.spacy")
+    def test_spacy_model_not_installed(self, mock_spacy_module, service):
+        """Test error when spaCy model is not installed."""
+        mock_spacy_module.load.side_effect = OSError("Model not found")
+
+        with pytest.raises(AIServiceError, match="spaCy model not installed"):
+            service._extract_keywords_spacy("Test text")
+
+
+class TestParseKeywordResponse:
+    """Test keyword response parsing."""
+
+    @pytest.fixture
+    def service(self, tmp_path):
+        """Create AI service."""
+        with patch("resume_customizer.core.ai_service.Anthropic"):
+            return AIService(api_key="test-key", cache_dir=tmp_path)
+
+    def test_parse_valid_json(self, service):
+        """Test parsing valid JSON response."""
+        response = json.dumps({
+            "technical_skills": [{"keyword": "Python", "weight": 0.9}],
+            "domain_knowledge": [],
+            "soft_skills": [],
+            "action_verbs": [],
+            "metrics": []
+        })
+
+        keywords = service._parse_keyword_response(response)
+
+        assert keywords["technical_skills"][0]["keyword"] == "Python"
+        assert keywords["technical_skills"][0]["weight"] == 0.9
+
+    def test_parse_json_with_surrounding_text(self, service):
+        """Test parsing JSON with extra text."""
+        response = """Here's the result:
+
+{"technical_skills": [], "domain_knowledge": [], "soft_skills": [], "action_verbs": [], "metrics": []}
+
+Done!"""
+
+        keywords = service._parse_keyword_response(response)
+
+        assert isinstance(keywords, dict)
+        assert "technical_skills" in keywords
+
+    def test_parse_missing_json(self, service):
+        """Test error when JSON is not found."""
+        with pytest.raises(json.JSONDecodeError, match="No JSON object found"):
+            service._parse_keyword_response("No JSON here")
+
+    def test_parse_invalid_json(self, service):
+        """Test error with invalid JSON syntax."""
+        with pytest.raises(json.JSONDecodeError):
+            service._parse_keyword_response("{invalid json}")
+
+    def test_parse_missing_required_field(self, service):
+        """Test error when required field is missing."""
+        response = json.dumps({
+            "technical_skills": []
+            # Missing other required fields
+        })
+
+        with pytest.raises(KeyError, match="Missing required field"):
+            service._parse_keyword_response(response)
+
+    def test_parse_validates_structure(self, service):
+        """Test that parser validates and fixes structure."""
+        # Non-list values should be converted to empty lists
+        response = json.dumps({
+            "technical_skills": "not a list",
+            "domain_knowledge": None,
+            "soft_skills": [],
+            "action_verbs": "also not a list",
+            "metrics": []
+        })
+
+        keywords = service._parse_keyword_response(response)
+
+        # Should convert invalid values to empty lists
+        assert keywords["technical_skills"] == []
+        assert keywords["domain_knowledge"] == []
+        assert keywords["action_verbs"] == []
+
+
 class TestGetAIService:
     """Test singleton service getter."""
 

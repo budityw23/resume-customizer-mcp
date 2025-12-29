@@ -350,25 +350,37 @@ tests/test_ai_service.py (22 tests, all passing)
 **Sign-off**: Phase 3.1 Complete - Date: 2025-12-29
 
 ### 3.2 Keyword Extraction ✅
-- [ ] Implement `extract_keywords()` function
-  - [ ] Create prompt template
-  - [ ] Call Claude API
-  - [ ] Parse JSON response
-  - [ ] Categorize keywords (technical, domain, soft)
-  - [ ] Weight keywords by importance
-- [ ] Implement spaCy fallback
-  - [ ] Use spaCy for extraction
-  - [ ] Compare with AI results
-  - [ ] Hybrid approach
-- [ ] Write unit tests
-  - [ ] Test AI extraction
-  - [ ] Test spaCy fallback
-  - [ ] Test keyword categorization
-- [ ] Test: Extracts relevant keywords
-- [ ] Test: Falls back to spaCy on API failure
-- [ ] Test: Results are consistent
+- [x] Implement `extract_keywords()` function
+  - [x] Create prompt template
+  - [x] Call Claude API
+  - [x] Parse JSON response
+  - [x] Categorize keywords (technical, domain, soft)
+  - [x] Weight keywords by importance
+- [x] Implement spaCy fallback
+  - [x] Use spaCy for extraction
+  - [x] Compare with AI results
+  - [x] Hybrid approach
+- [x] Write unit tests
+  - [x] Test AI extraction
+  - [x] Test spaCy fallback
+  - [x] Test keyword categorization
+- [x] Test: Extracts relevant keywords
+- [x] Test: Falls back to spaCy on API failure
+- [x] Test: Results are consistent
 
 **Add to**: `src/resume_customizer/core/ai_service.py`
+
+**Tests**: `tests/test_ai_service.py` (39 tests total, all passing - 87% coverage on ai_service.py)
+
+**Features Implemented**:
+
+- Claude API keyword extraction with intelligent categorization
+- Weight assignment based on keyword importance (0.0-1.0)
+- JSON response parsing with validation and error recovery
+- spaCy NLP fallback for when API is unavailable
+- Comprehensive error handling and logging
+
+**Sign-off**: Phase 3.2 Complete - Date: 2025-12-29
 
 ### 3.3 Achievement Rephrasing ✅
 - [ ] Implement `rephrase_achievement()` function

@@ -341,6 +341,7 @@ def test_skill_hierarchy():
    - Return ranked list with scores
 
 #### Deliverables
+
 - [ ] `core/matcher.py` extended with `rank_achievements()`
 - [ ] Keyword extraction using spaCy
 - [ ] Relevance scoring algorithm

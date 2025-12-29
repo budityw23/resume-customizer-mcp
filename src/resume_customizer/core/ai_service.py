@@ -23,6 +23,16 @@ logger = get_logger(__name__)
 # Load environment variables
 load_dotenv()
 
+# Try to import spaCy for fallback keyword extraction
+try:
+    import spacy
+    from spacy.language import Language
+
+    SPACY_AVAILABLE = True
+except ImportError:
+    SPACY_AVAILABLE = False
+    logger.warning("spaCy not available. Keyword extraction will only use Claude API.")
+
 
 def _get_config_value(key: str, default: Any) -> Any:
     """Get configuration value from environment."""
@@ -324,6 +334,285 @@ class AIService:
 
         logger.info(f"Cleared {count} expired cache files")
         return count
+
+    def extract_keywords(
+        self,
+        text: str,
+        use_cache: bool = True,
+        use_fallback: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Extract keywords from text using Claude API with spaCy fallback.
+
+        This function extracts and categorizes keywords into technical skills,
+        domain knowledge, and soft skills. It uses Claude AI for intelligent
+        extraction and falls back to spaCy NLP when the API is unavailable.
+
+        Args:
+            text: The text to extract keywords from (job description, resume, etc.)
+            use_cache: Whether to use cached responses (default: True)
+            use_fallback: Whether to use spaCy fallback on API failure (default: True)
+
+        Returns:
+            Dictionary with categorized keywords:
+            {
+                "technical_skills": [{"keyword": str, "weight": float}, ...],
+                "domain_knowledge": [{"keyword": str, "weight": float}, ...],
+                "soft_skills": [{"keyword": str, "weight": float}, ...],
+                "action_verbs": [str, ...],
+                "metrics": [str, ...]
+            }
+
+        Raises:
+            AIServiceError: If both API and fallback fail
+
+        Example:
+            >>> service = AIService()
+            >>> keywords = service.extract_keywords(
+            ...     "Looking for a Python developer with 5 years of experience..."
+            ... )
+            >>> print(keywords["technical_skills"])
+            [{"keyword": "Python", "weight": 0.95}, ...]
+        """
+        # Try Claude API first
+        try:
+            system_prompt = """You are an expert at extracting keywords from job descriptions and resumes.
+Extract and categorize keywords into:
+1. Technical Skills (programming languages, frameworks, tools, technologies)
+2. Domain Knowledge (industry terms, business domains, methodologies)
+3. Soft Skills (communication, leadership, teamwork, etc.)
+4. Action Verbs (delivered, built, led, improved, etc.)
+5. Metrics (numbers, percentages, achievements with quantifiable results)
+
+For skills and domain knowledge, assign a weight (0.0-1.0) based on:
+- Explicit "required" or "must-have" → 1.0
+- Emphasized (repeated, in requirements) → 0.8-0.9
+- Mentioned (in nice-to-have, description) → 0.5-0.7
+- Implied or context-only → 0.3-0.4
+
+Return your response as a valid JSON object with this exact structure:
+{
+  "technical_skills": [{"keyword": "Python", "weight": 0.9}, ...],
+  "domain_knowledge": [{"keyword": "FinTech", "weight": 0.7}, ...],
+  "soft_skills": [{"keyword": "leadership", "weight": 0.6}, ...],
+  "action_verbs": ["delivered", "built", "led", ...],
+  "metrics": ["5+ years", "100% uptime", "30% improvement", ...]
+}
+
+Only return the JSON object, no other text."""
+
+            prompt = f"""Extract keywords from the following text:
+
+{text}"""
+
+            response = self.call_claude(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=2048,
+                temperature=0.3,  # Lower temperature for more consistent extraction
+                use_cache=use_cache,
+            )
+
+            # Parse JSON response
+            keywords = self._parse_keyword_response(response)
+
+            logger.info(
+                f"Extracted {len(keywords['technical_skills'])} technical skills, "
+                f"{len(keywords['domain_knowledge'])} domain keywords, "
+                f"{len(keywords['soft_skills'])} soft skills"
+            )
+
+            return keywords
+
+        except (AIServiceError, json.JSONDecodeError, KeyError) as e:
+            logger.warning(f"Claude API keyword extraction failed: {e}")
+
+            if use_fallback and SPACY_AVAILABLE:
+                logger.info("Falling back to spaCy extraction")
+                return self._extract_keywords_spacy(text)
+            else:
+                error_msg = "Keyword extraction failed and no fallback available"
+                logger.error(error_msg)
+                raise AIServiceError(error_msg) from e
+
+    def _parse_keyword_response(self, response: str) -> dict[str, Any]:
+        """
+        Parse and validate Claude's JSON response for keyword extraction.
+
+        Args:
+            response: Raw response text from Claude
+
+        Returns:
+            Validated keyword dictionary
+
+        Raises:
+            json.JSONDecodeError: If response is not valid JSON
+            KeyError: If required fields are missing
+        """
+        # Try to extract JSON from response (in case there's extra text)
+        response = response.strip()
+
+        # Find JSON object boundaries
+        start = response.find("{")
+        end = response.rfind("}") + 1
+
+        if start == -1 or end == 0:
+            raise json.JSONDecodeError("No JSON object found", response, 0)
+
+        json_str = response[start:end]
+        keywords = json.loads(json_str)
+
+        # Validate required fields
+        required_fields = [
+            "technical_skills",
+            "domain_knowledge",
+            "soft_skills",
+            "action_verbs",
+            "metrics",
+        ]
+        for field in required_fields:
+            if field not in keywords:
+                raise KeyError(f"Missing required field: {field}")
+
+        # Validate structure
+        for skill_type in ["technical_skills", "domain_knowledge", "soft_skills"]:
+            if not isinstance(keywords[skill_type], list):
+                keywords[skill_type] = []
+
+            # Ensure each item has keyword and weight
+            validated_items = []
+            for item in keywords[skill_type]:
+                if isinstance(item, dict) and "keyword" in item and "weight" in item:
+                    validated_items.append(item)
+                elif isinstance(item, str):
+                    # Convert string to dict with default weight
+                    validated_items.append({"keyword": item, "weight": 0.5})
+
+            keywords[skill_type] = validated_items
+
+        # Validate lists
+        for list_type in ["action_verbs", "metrics"]:
+            if not isinstance(keywords[list_type], list):
+                keywords[list_type] = []
+
+        return keywords
+
+    def _extract_keywords_spacy(self, text: str) -> dict[str, Any]:
+        """
+        Fallback keyword extraction using spaCy NLP.
+
+        This is a rule-based extraction that's less sophisticated than
+        Claude but provides basic functionality when the API is unavailable.
+
+        Args:
+            text: Text to extract keywords from
+
+        Returns:
+            Dictionary with categorized keywords (same format as extract_keywords)
+        """
+        if not SPACY_AVAILABLE:
+            raise AIServiceError("spaCy not available for fallback extraction")
+
+        try:
+            # Load spaCy model
+            try:
+                nlp = spacy.load("en_core_web_sm")
+            except OSError:
+                logger.error(
+                    "spaCy model 'en_core_web_sm' not found. "
+                    "Run: python -m spacy download en_core_web_sm"
+                )
+                raise AIServiceError("spaCy model not installed")
+
+            doc = nlp(text)
+
+            # Extract technical skills (nouns that might be technologies)
+            technical_skills = []
+            tech_keywords = {
+                "python",
+                "javascript",
+                "java",
+                "react",
+                "node",
+                "docker",
+                "kubernetes",
+                "aws",
+                "azure",
+                "gcp",
+                "sql",
+                "nosql",
+                "api",
+                "rest",
+                "graphql",
+                "git",
+                "ci/cd",
+                "agile",
+                "scrum",
+            }
+
+            for token in doc:
+                if (
+                    token.pos_ in ["NOUN", "PROPN"]
+                    and token.text.lower() in tech_keywords
+                ):
+                    technical_skills.append({"keyword": token.text, "weight": 0.6})
+
+            # Extract noun chunks as potential domain knowledge
+            domain_knowledge = []
+            for chunk in doc.noun_chunks:
+                if len(chunk.text.split()) > 1:  # Multi-word phrases
+                    domain_knowledge.append({"keyword": chunk.text, "weight": 0.5})
+
+            # Extract adjectives as potential soft skills
+            soft_skills = []
+            soft_skill_words = {
+                "collaborative",
+                "creative",
+                "analytical",
+                "detail-oriented",
+                "team",
+                "leadership",
+                "communication",
+            }
+
+            for token in doc:
+                if token.pos_ == "ADJ" and token.text.lower() in soft_skill_words:
+                    soft_skills.append({"keyword": token.text, "weight": 0.5})
+
+            # Extract action verbs
+            action_verbs = []
+            for token in doc:
+                if token.pos_ == "VERB" and not token.is_stop:
+                    action_verbs.append(token.lemma_)
+
+            # Extract metrics (numbers with context)
+            metrics = []
+            for ent in doc.ents:
+                if ent.label_ in ["PERCENT", "QUANTITY", "CARDINAL"]:
+                    # Get surrounding context
+                    start = max(0, ent.start - 2)
+                    end = min(len(doc), ent.end + 2)
+                    context = doc[start:end].text
+                    metrics.append(context)
+
+            logger.info(
+                f"spaCy fallback extracted {len(technical_skills)} technical skills, "
+                f"{len(domain_knowledge)} domain keywords, "
+                f"{len(soft_skills)} soft skills"
+            )
+
+            return {
+                "technical_skills": technical_skills[:20],  # Limit results
+                "domain_knowledge": domain_knowledge[:15],
+                "soft_skills": soft_skills[:10],
+                "action_verbs": list(set(action_verbs))[:20],
+                "metrics": list(set(metrics))[:10],
+            }
+
+        except Exception as e:
+            logger.error(f"spaCy keyword extraction failed: {e}")
+            raise AIServiceError(f"Fallback extraction failed: {e}") from e
 
 
 # Singleton instance for convenience
