@@ -632,6 +632,292 @@ Done!"""
         assert keywords["action_verbs"] == []
 
 
+class TestAchievementRephrasing:
+    """Test achievement rephrasing functionality."""
+
+    @pytest.fixture
+    def service(self, tmp_path):
+        """Create AI service with mocked client."""
+        with patch("resume_customizer.core.ai_service.Anthropic"):
+            return AIService(api_key="test-key", cache_dir=tmp_path)
+
+    def test_rephrase_achievement_success(self, service):
+        """Test successful achievement rephrasing."""
+        mock_json_response = json.dumps({
+            "rephrased": "Developed a scalable Python microservices platform that improved system performance by 40%",
+            "metrics_preserved": True,
+            "keywords_added": ["Python", "scalable", "microservices"],
+            "improvements": ["Added technical context", "Clarified impact"],
+            "truthfulness_check": "confirmed"
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            result = service.rephrase_achievement(
+                "Built a web app that improved performance by 40%",
+                job_keywords=["Python", "scalable", "microservices"],
+                style="technical"
+            )
+
+            assert result["original"] == "Built a web app that improved performance by 40%"
+            assert "40%" in result["rephrased"]
+            assert result["metrics_preserved"] is True
+            assert len(result["keywords_added"]) == 3
+            assert result["style"] == "technical"
+
+    def test_rephrase_achievement_balanced_style(self, service):
+        """Test rephrasing with balanced style."""
+        mock_json_response = json.dumps({
+            "rephrased": "Led development of authentication system reducing login failures by 95%",
+            "metrics_preserved": True,
+            "keywords_added": ["authentication"],
+            "improvements": ["Improved clarity"],
+            "truthfulness_check": "confirmed"
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            result = service.rephrase_achievement(
+                "Made login better, reduced failures by 95%",
+                style="balanced"
+            )
+
+            assert result["style"] == "balanced"
+            assert "95%" in result["rephrased"]
+
+    def test_rephrase_achievement_results_style(self, service):
+        """Test rephrasing with results-focused style."""
+        mock_json_response = json.dumps({
+            "rephrased": "Delivered 30% cost reduction through infrastructure optimization",
+            "metrics_preserved": True,
+            "keywords_added": ["cost reduction"],
+            "improvements": ["Emphasized business impact"],
+            "truthfulness_check": "confirmed"
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            result = service.rephrase_achievement(
+                "Optimized infrastructure saving 30% costs",
+                style="results"
+            )
+
+            assert result["style"] == "results"
+            assert "30%" in result["rephrased"]
+
+    def test_rephrase_achievement_invalid_style(self, service):
+        """Test that invalid style raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid style"):
+            service.rephrase_achievement(
+                "Some achievement",
+                style="invalid_style"
+            )
+
+    def test_rephrase_achievement_without_keywords(self, service):
+        """Test rephrasing without job keywords."""
+        mock_json_response = json.dumps({
+            "rephrased": "Improved system throughput by 50%",
+            "metrics_preserved": True,
+            "keywords_added": [],
+            "improvements": ["Better clarity"],
+            "truthfulness_check": "confirmed"
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            result = service.rephrase_achievement(
+                "Made system faster by 50%"
+            )
+
+            assert len(result["keywords_added"]) == 0
+            assert "50%" in result["rephrased"]
+
+    def test_rephrase_achievement_metrics_validation_failure(self, service):
+        """Test that metrics validation detects missing numbers."""
+        # Mock response that loses metrics
+        mock_json_response = json.dumps({
+            "rephrased": "Built a web application that improved performance",
+            "metrics_preserved": True,
+            "keywords_added": [],
+            "improvements": ["Simplified"],
+            "truthfulness_check": "confirmed"
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            result = service.rephrase_achievement(
+                "Built a web app that improved performance by 40%"
+            )
+
+            # Metrics validation should detect missing 40%
+            assert result["metrics_preserved"] is False
+
+    def test_rephrase_achievement_truthfulness_warning(self, service):
+        """Test warning when truthfulness check fails."""
+        mock_json_response = json.dumps({
+            "rephrased": "Some rephrased text",
+            "metrics_preserved": True,
+            "keywords_added": [],
+            "improvements": [],
+            "truthfulness_check": "not_confirmed"  # Failed check
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            # Should still return but log warning
+            result = service.rephrase_achievement("Original text")
+            assert "rephrased" in result
+
+    def test_rephrase_achievement_api_failure(self, service):
+        """Test handling of API failures."""
+        with patch.object(service, "call_claude", side_effect=AIServiceError("API failed")):
+            with pytest.raises(AIServiceError, match="Failed to rephrase achievement"):
+                service.rephrase_achievement("Some achievement")
+
+    def test_rephrase_achievement_invalid_json(self, service):
+        """Test handling of invalid JSON response."""
+        with patch.object(service, "call_claude", return_value="Not valid JSON"):
+            with pytest.raises(AIServiceError, match="Failed to rephrase achievement"):
+                service.rephrase_achievement("Some achievement")
+
+    def test_rephrase_achievement_missing_fields(self, service):
+        """Test handling of incomplete JSON response."""
+        mock_json_response = json.dumps({
+            "rephrased": "Some text",
+            # Missing required fields
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            with pytest.raises(AIServiceError):
+                service.rephrase_achievement("Some achievement")
+
+
+class TestParseRephraseResponse:
+    """Test rephrase response parsing."""
+
+    @pytest.fixture
+    def service(self, tmp_path):
+        """Create AI service."""
+        with patch("resume_customizer.core.ai_service.Anthropic"):
+            return AIService(api_key="test-key", cache_dir=tmp_path)
+
+    def test_parse_valid_rephrase_response(self, service):
+        """Test parsing valid rephrase response."""
+        response = json.dumps({
+            "rephrased": "Improved text",
+            "metrics_preserved": True,
+            "keywords_added": ["keyword1"],
+            "improvements": ["improvement1"],
+            "truthfulness_check": "confirmed"
+        })
+
+        result = service._parse_rephrase_response(response)
+
+        assert result["rephrased"] == "Improved text"
+        assert result["metrics_preserved"] is True
+        assert len(result["keywords_added"]) == 1
+
+    def test_parse_rephrase_with_extra_text(self, service):
+        """Test parsing response with extra text."""
+        response = """Here's the rephrased version:
+
+{
+  "rephrased": "Better text",
+  "metrics_preserved": true,
+  "keywords_added": [],
+  "improvements": [],
+  "truthfulness_check": "confirmed"
+}
+
+Hope this helps!"""
+
+        result = service._parse_rephrase_response(response)
+        assert result["rephrased"] == "Better text"
+
+    def test_parse_rephrase_missing_json(self, service):
+        """Test error when JSON not found."""
+        with pytest.raises(json.JSONDecodeError, match="No JSON object found"):
+            service._parse_rephrase_response("No JSON here")
+
+    def test_parse_rephrase_missing_field(self, service):
+        """Test error when required field missing."""
+        response = json.dumps({
+            "rephrased": "Text",
+            # Missing other required fields
+        })
+
+        with pytest.raises(KeyError, match="Missing required field"):
+            service._parse_rephrase_response(response)
+
+    def test_parse_rephrase_invalid_lists(self, service):
+        """Test that invalid list values are converted."""
+        response = json.dumps({
+            "rephrased": "Text",
+            "metrics_preserved": True,
+            "keywords_added": "not a list",  # Invalid
+            "improvements": None,  # Invalid
+            "truthfulness_check": "confirmed"
+        })
+
+        result = service._parse_rephrase_response(response)
+        assert result["keywords_added"] == []
+        assert result["improvements"] == []
+
+
+class TestValidateMetricsPreserved:
+    """Test metrics validation functionality."""
+
+    @pytest.fixture
+    def service(self, tmp_path):
+        """Create AI service."""
+        with patch("resume_customizer.core.ai_service.Anthropic"):
+            return AIService(api_key="test-key", cache_dir=tmp_path)
+
+    def test_validate_metrics_all_preserved(self, service):
+        """Test validation when all metrics are preserved."""
+        original = "Improved performance by 40% and reduced costs by $50K"
+        rephrased = "Enhanced system performance by 40% while decreasing costs by $50K"
+
+        assert service._validate_metrics_preserved(original, rephrased) is True
+
+    def test_validate_metrics_missing_percentage(self, service):
+        """Test validation detects missing percentage."""
+        original = "Improved performance by 40%"
+        rephrased = "Improved performance significantly"
+
+        assert service._validate_metrics_preserved(original, rephrased) is False
+
+    def test_validate_metrics_missing_number(self, service):
+        """Test validation detects missing number."""
+        original = "Reduced latency by 500ms"
+        rephrased = "Reduced latency significantly"
+
+        assert service._validate_metrics_preserved(original, rephrased) is False
+
+    def test_validate_metrics_with_k_suffix(self, service):
+        """Test validation with K/M/B suffixes."""
+        original = "Saved $50K annually"
+        rephrased = "Achieved $50K in annual savings"
+
+        assert service._validate_metrics_preserved(original, rephrased) is True
+
+    def test_validate_metrics_decimal_numbers(self, service):
+        """Test validation with decimal numbers."""
+        original = "Improved accuracy by 99.9%"
+        rephrased = "Increased accuracy to 99.9%"
+
+        assert service._validate_metrics_preserved(original, rephrased) is True
+
+    def test_validate_metrics_no_metrics(self, service):
+        """Test validation when no metrics present."""
+        original = "Built a web application"
+        rephrased = "Developed a web application"
+
+        # No metrics to preserve, should pass
+        assert service._validate_metrics_preserved(original, rephrased) is True
+
+    def test_validate_metrics_case_insensitive(self, service):
+        """Test validation is case insensitive."""
+        original = "Reduced costs by 25%"
+        rephrased = "REDUCED COSTS BY 25%"
+
+        assert service._validate_metrics_preserved(original, rephrased) is True
+
+
 class TestGetAIService:
     """Test singleton service getter."""
 

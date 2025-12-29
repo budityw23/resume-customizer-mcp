@@ -614,6 +614,221 @@ Only return the JSON object, no other text."""
             logger.error(f"spaCy keyword extraction failed: {e}")
             raise AIServiceError(f"Fallback extraction failed: {e}") from e
 
+    def rephrase_achievement(
+        self,
+        achievement: str,
+        job_keywords: list[str] | None = None,
+        style: str = "balanced",
+        use_cache: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Rephrase an achievement to better align with job requirements.
+
+        This function uses Claude to rephrase achievements while:
+        - Preserving the original meaning and all metrics
+        - Naturally incorporating relevant job keywords
+        - Optimizing for ATS (Applicant Tracking Systems)
+        - Maintaining truthfulness (no exaggeration or fabrication)
+        - Improving clarity and impact
+
+        Args:
+            achievement: The original achievement text to rephrase
+            job_keywords: Optional list of keywords from job description to incorporate
+            style: Rephrasing style - "technical", "results", or "balanced" (default)
+            use_cache: Whether to use cached responses (default: True)
+
+        Returns:
+            Dictionary with rephrasing results:
+            {
+                "original": str,
+                "rephrased": str,
+                "metrics_preserved": bool,
+                "keywords_added": [str, ...],
+                "improvements": [str, ...],
+                "style": str
+            }
+
+        Raises:
+            AIServiceError: If API call fails
+            ValueError: If style is invalid
+
+        Example:
+            >>> service = AIService()
+            >>> result = service.rephrase_achievement(
+            ...     "Built a web app that processed data",
+            ...     job_keywords=["Python", "scalable", "microservices"],
+            ...     style="technical"
+            ... )
+            >>> print(result["rephrased"])
+            "Developed a scalable Python microservices application..."
+        """
+        # Validate style
+        valid_styles = ["technical", "results", "balanced"]
+        if style not in valid_styles:
+            raise ValueError(
+                f"Invalid style '{style}'. Must be one of: {', '.join(valid_styles)}"
+            )
+
+        # Build system prompt based on style
+        style_instructions = {
+            "technical": "Focus on technical details, technologies, and implementation. "
+            "Emphasize the 'how' - architectures, tools, methodologies used.",
+            "results": "Focus on business impact, outcomes, and measurable results. "
+            "Emphasize the 'what' - metrics, improvements, value delivered.",
+            "balanced": "Balance technical details with business results. "
+            "Show both the technical approach and the measurable impact.",
+        }
+
+        system_prompt = f"""You are an expert resume writer specializing in achievement statements.
+
+Your task is to rephrase achievement statements while maintaining complete truthfulness.
+
+CRITICAL RULES:
+1. PRESERVE ALL METRICS: Never change numbers, percentages, or measurements
+2. NO FABRICATION: Only state what's in the original - no additions or exaggerations
+3. MAINTAIN MEANING: The rephrased version must convey the same accomplishment
+4. NATURAL KEYWORDS: If job keywords are provided, incorporate them naturally if relevant
+5. ATS OPTIMIZATION: Use clear, scannable language with industry-standard terms
+6. IMPROVE CLARITY: Make the achievement more impactful and easier to understand
+
+Style: {style_instructions[style]}
+
+Return your response as a valid JSON object with this exact structure:
+{{
+  "rephrased": "The improved achievement statement",
+  "metrics_preserved": true,
+  "keywords_added": ["keyword1", "keyword2"],
+  "improvements": ["Clarified impact", "Added technical context"],
+  "truthfulness_check": "confirmed"
+}}
+
+Only return the JSON object, no other text."""
+
+        # Build prompt with job keywords context
+        keywords_context = ""
+        if job_keywords:
+            keywords_context = f"\n\nJob Keywords to consider (use naturally if relevant):\n{', '.join(job_keywords)}"
+
+        prompt = f"""Rephrase this achievement statement:
+
+Original: {achievement}{keywords_context}
+
+Remember:
+- Preserve ALL numbers and metrics exactly
+- Do not fabricate or exaggerate
+- Maintain the original meaning
+- Incorporate keywords naturally (don't force them)
+- Optimize for clarity and ATS scanning"""
+
+        try:
+            response = self.call_claude(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=1024,
+                temperature=0.5,  # Moderate creativity for rephrasing
+                use_cache=use_cache,
+            )
+
+            # Parse JSON response
+            result = self._parse_rephrase_response(response)
+
+            # Add original achievement and style to result
+            result["original"] = achievement
+            result["style"] = style
+
+            # Validate metrics preservation
+            if not self._validate_metrics_preserved(achievement, result["rephrased"]):
+                logger.warning("Metrics may not be preserved correctly in rephrased achievement")
+                result["metrics_preserved"] = False
+
+            logger.info(f"Rephrased achievement with {len(result['keywords_added'])} keywords added")
+
+            return result
+
+        except (AIServiceError, json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Achievement rephrasing failed: {e}")
+            raise AIServiceError(f"Failed to rephrase achievement: {e}") from e
+
+    def _parse_rephrase_response(self, response: str) -> dict[str, Any]:
+        """
+        Parse and validate Claude's JSON response for achievement rephrasing.
+
+        Args:
+            response: Raw response text from Claude
+
+        Returns:
+            Validated rephrase result dictionary
+
+        Raises:
+            json.JSONDecodeError: If response is not valid JSON
+            KeyError: If required fields are missing
+        """
+        # Extract JSON from response
+        response = response.strip()
+        start = response.find("{")
+        end = response.rfind("}") + 1
+
+        if start == -1 or end == 0:
+            raise json.JSONDecodeError("No JSON object found", response, 0)
+
+        json_str = response[start:end]
+        result = json.loads(json_str)
+
+        # Validate required fields
+        required_fields = [
+            "rephrased",
+            "metrics_preserved",
+            "keywords_added",
+            "improvements",
+            "truthfulness_check",
+        ]
+        for field in required_fields:
+            if field not in result:
+                raise KeyError(f"Missing required field: {field}")
+
+        # Validate truthfulness check
+        if result["truthfulness_check"] != "confirmed":
+            logger.warning("Truthfulness check failed - response may contain fabrications")
+
+        # Ensure keywords_added and improvements are lists
+        if not isinstance(result["keywords_added"], list):
+            result["keywords_added"] = []
+        if not isinstance(result["improvements"], list):
+            result["improvements"] = []
+
+        return result
+
+    def _validate_metrics_preserved(self, original: str, rephrased: str) -> bool:
+        """
+        Validate that all metrics from original are preserved in rephrased version.
+
+        This is a basic validation that checks for the presence of numbers
+        and percentage values.
+
+        Args:
+            original: Original achievement text
+            rephrased: Rephrased achievement text
+
+        Returns:
+            True if metrics appear to be preserved, False otherwise
+        """
+        import re
+
+        # Extract numbers (including decimals and percentages)
+        number_pattern = r"\d+(?:\.\d+)?%?|\d+[kKmMbB]?"
+
+        original_numbers = set(re.findall(number_pattern, original.lower()))
+        rephrased_numbers = set(re.findall(number_pattern, rephrased.lower()))
+
+        # Check if all original numbers are in rephrased
+        if original_numbers and not original_numbers.issubset(rephrased_numbers):
+            missing = original_numbers - rephrased_numbers
+            logger.warning(f"Missing metrics in rephrased version: {missing}")
+            return False
+
+        return True
+
 
 # Singleton instance for convenience
 _ai_service: AIService | None = None
