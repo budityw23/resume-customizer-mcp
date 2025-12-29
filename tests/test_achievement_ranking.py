@@ -9,10 +9,8 @@ Tests cover:
 - Scoring consistency
 """
 
-import pytest
 
 from resume_customizer.core.matcher import (
-    RankedAchievement,
     extract_keywords,
     extract_metrics,
     extract_technical_terms,
@@ -364,7 +362,7 @@ class TestAchievementRankingConsistency:
 
         # Results should be identical
         assert len(ranked1) == len(ranked2)
-        for r1, r2 in zip(ranked1, ranked2):
+        for r1, r2 in zip(ranked1, ranked2, strict=True):
             assert r1.score == r2.score
             assert r1.achievement == r2.achievement
 

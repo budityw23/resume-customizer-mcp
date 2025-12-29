@@ -11,7 +11,6 @@ Tests cover:
 - Reproducibility
 """
 
-import pytest
 
 from resume_customizer.core.matcher import SkillMatcher
 from resume_customizer.core.models import Skill
@@ -371,7 +370,7 @@ class TestReproducibility:
         assert set(missing1) == set(missing2)
 
         # Match details should be the same
-        for m1, m2 in zip(matched1, matched2):
+        for m1, m2 in zip(matched1, matched2, strict=True):
             assert m1.skill == m2.skill
             assert m1.matched == m2.matched
             assert m1.category == m2.category

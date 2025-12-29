@@ -1,9 +1,10 @@
 """
-Matching Engine for Resume Customizer - Phase 2.1 & 2.2.
+Matching Engine for Resume Customizer - Phase 2.1, 2.2 & 2.3.
 
 This module implements:
 - Phase 2.1: Skill matching with normalization, synonyms, fuzzy matching, hierarchies
 - Phase 2.2: Achievement ranking with keyword extraction and scoring
+- Phase 2.3: Match scoring with weighted components and gap analysis
 """
 
 import re
@@ -18,6 +19,8 @@ from rapidfuzz import fuzz
 from resume_customizer.core.models import (
     Achievement,
     JobDescription,
+    MatchBreakdown,
+    MatchResult,
     Skill,
     SkillMatch,
     UserProfile,
@@ -599,3 +602,336 @@ def rank_achievements(
         logger.debug(f"Top score: {ranked[0].score:.1f}, Bottom score: {ranked[-1].score:.1f}")
 
     return ranked
+
+
+# ============================================================================
+# Phase 2.3: Match Scoring Implementation
+# ============================================================================
+
+
+def calculate_experience_score(
+    user_profile: UserProfile, job_description: JobDescription
+) -> float:
+    """
+    Calculate experience level match score (0-100).
+
+    Compares user's years of experience with job requirements.
+
+    Args:
+        user_profile: User's profile
+        job_description: Job description
+
+    Returns:
+        Score from 0-100 based on experience match
+
+    Examples:
+        >>> calculate_experience_score(profile, job)
+        85.0  # User has 5 years, job requires 3-5 years
+    """
+    required_years = job_description.requirements.required_experience_years
+
+    # If no requirement specified, give full score
+    if required_years is None:
+        return 100.0
+
+    # Calculate total years from experiences
+    # For simplicity, count the number of experiences as a proxy for years
+    # In a real implementation, you'd parse dates to get actual years
+    user_experience_count = len(user_profile.experiences)
+
+    # Rough heuristic: each experience is ~2 years
+    estimated_years = user_experience_count * 2
+
+    # Score based on how close user's experience is to requirement
+    if estimated_years >= required_years:
+        # Has required experience or more - full score
+        # Bonus decay for overqualification
+        if estimated_years > required_years * 2:
+            return 90.0  # Slightly penalize for being overqualified
+        return 100.0
+    else:
+        # Under-qualified: score proportional to requirement
+        return min((estimated_years / required_years) * 100, 100.0)
+
+
+def calculate_domain_score(
+    user_profile: UserProfile, job_description: JobDescription
+) -> float:
+    """
+    Calculate domain knowledge match score (0-100).
+
+    Compares user's work experience in similar domains/industries with job.
+
+    Args:
+        user_profile: User's profile
+        job_description: Job description
+
+    Returns:
+        Score from 0-100 based on domain match
+
+    Examples:
+        >>> calculate_domain_score(profile, job)
+        75.0  # User has relevant industry experience
+    """
+    # Extract domain keywords from job
+    job_domain_text = " ".join(
+        [
+            job_description.company_description or "",
+            job_description.description or "",
+        ]
+    )
+
+    if not job_domain_text.strip():
+        return 100.0  # No domain context to match against
+
+    job_domain_keywords = set(extract_keywords(job_domain_text))
+
+    # Extract keywords from user's experience descriptions
+    user_domain_keywords = set()
+    for exp in user_profile.experiences:
+        if exp.description:
+            user_domain_keywords.update(extract_keywords(exp.description))
+
+    # Calculate overlap
+    if not job_domain_keywords:
+        return 100.0
+
+    overlap = len(job_domain_keywords & user_domain_keywords)
+    score = min((overlap / len(job_domain_keywords)) * 100, 100.0)
+
+    return score
+
+
+def calculate_keyword_score(
+    user_profile: UserProfile, job_description: JobDescription
+) -> float:
+    """
+    Calculate keyword coverage score (0-100).
+
+    Measures how many important keywords from the job description
+    appear in the user's profile.
+
+    Args:
+        user_profile: User's profile
+        job_description: Job description
+
+    Returns:
+        Score from 0-100 based on keyword coverage
+
+    Examples:
+        >>> calculate_keyword_score(profile, job)
+        80.0  # 80% of job keywords found in profile
+    """
+    # Extract job keywords
+    job_text = " ".join(
+        [
+            job_description.title,
+            job_description.description or "",
+            " ".join(job_description.responsibilities),
+        ]
+    )
+    job_keywords = set(extract_keywords(job_text))
+
+    # Extract user keywords from summary and achievements
+    user_text_parts = [user_profile.summary]
+    for exp in user_profile.experiences:
+        for achievement in exp.achievements:
+            user_text_parts.append(achievement.text)
+
+    user_keywords = set(extract_keywords(" ".join(user_text_parts)))
+
+    # Calculate coverage
+    if not job_keywords:
+        return 100.0
+
+    overlap = len(job_keywords & user_keywords)
+    coverage = (overlap / len(job_keywords)) * 100
+
+    return min(coverage, 100.0)
+
+
+def calculate_match_score(
+    user_profile: UserProfile,
+    job_description: JobDescription,
+    skill_matcher: SkillMatcher | None = None,
+) -> MatchResult:
+    """
+    Calculate overall match score between user profile and job description.
+
+    Scoring breakdown:
+    - Technical Skills (40%): Match of required/preferred skills
+    - Experience Level (25%): Years of experience vs requirement
+    - Domain Knowledge (20%): Industry/domain experience
+    - Keyword Coverage (15%): Presence of job keywords in profile
+
+    Args:
+        user_profile: User's profile
+        job_description: Target job description
+        skill_matcher: Optional SkillMatcher instance (creates new if None)
+
+    Returns:
+        MatchResult with overall score, breakdown, and suggestions
+
+    Examples:
+        >>> result = calculate_match_score(profile, job)
+        >>> result.overall_score
+        85
+        >>> result.breakdown.technical_skills_score
+        90.0
+    """
+    # Initialize skill matcher if not provided
+    if skill_matcher is None:
+        skill_matcher = SkillMatcher()
+
+    # 1. Calculate Technical Skills Score (40% weight)
+    required_skills_percentage = skill_matcher.calculate_required_skills_match(
+        user_profile.skills, job_description.requirements.required_skills
+    )
+
+    # Also check preferred skills
+    preferred_skills_percentage = 100.0
+    if job_description.requirements.preferred_skills:
+        preferred_skills_percentage = skill_matcher.calculate_required_skills_match(
+            user_profile.skills, job_description.requirements.preferred_skills
+        )
+
+    # Weighted average: required skills are more important (70/30)
+    technical_skills_score = (required_skills_percentage * 0.7) + (preferred_skills_percentage * 0.3)
+
+    # 2. Calculate Experience Score (25% weight)
+    experience_score = calculate_experience_score(user_profile, job_description)
+
+    # 3. Calculate Domain Score (20% weight)
+    domain_score = calculate_domain_score(user_profile, job_description)
+
+    # 4. Calculate Keyword Coverage Score (15% weight)
+    keyword_score = calculate_keyword_score(user_profile, job_description)
+
+    # Calculate weighted total
+    total_score = (
+        (technical_skills_score * 0.40) +
+        (experience_score * 0.25) +
+        (domain_score * 0.20) +
+        (keyword_score * 0.15)
+    )
+
+    # Get matched and missing skills
+    matched_skills, missing_required = skill_matcher.match_skills(
+        user_profile.skills, job_description.requirements.required_skills
+    )
+
+    missing_preferred: list[str] = []
+    if job_description.requirements.preferred_skills:
+        _, missing_preferred = skill_matcher.match_skills(
+            user_profile.skills, job_description.requirements.preferred_skills
+        )
+
+    # Generate suggestions based on gaps
+    suggestions = _generate_suggestions(
+        missing_required=missing_required,
+        missing_preferred=missing_preferred,
+        technical_score=technical_skills_score,
+        experience_score=experience_score,
+        domain_score=domain_score,
+        keyword_score=keyword_score,
+    )
+
+    # Rank achievements
+    all_achievements = []
+    for exp in user_profile.experiences:
+        all_achievements.extend(exp.achievements)
+
+    ranked_achievements_list = rank_achievements(all_achievements, job_description, user_profile)
+    ranked_achievements_tuples = [
+        (ra.achievement, ra.score) for ra in ranked_achievements_list
+    ]
+
+    # Create result
+    breakdown = MatchBreakdown(
+        technical_skills_score=round(technical_skills_score, 1),
+        experience_score=round(experience_score, 1),
+        domain_score=round(domain_score, 1),
+        keyword_coverage_score=round(keyword_score, 1),
+        total_score=round(total_score, 1),
+    )
+
+    result = MatchResult(
+        profile_id=user_profile.profile_id or "unknown",
+        job_id=job_description.job_id or "unknown",
+        overall_score=int(round(total_score)),
+        breakdown=breakdown,
+        matched_skills=matched_skills,
+        missing_required_skills=missing_required,
+        missing_preferred_skills=missing_preferred,
+        suggestions=suggestions,
+        ranked_achievements=ranked_achievements_tuples,
+    )
+
+    logger.info(
+        f"Match calculated: {result.overall_score}% "
+        f"(tech:{technical_skills_score:.1f}, exp:{experience_score:.1f}, "
+        f"domain:{domain_score:.1f}, keywords:{keyword_score:.1f})"
+    )
+
+    return result
+
+
+def _generate_suggestions(
+    missing_required: list[str],
+    missing_preferred: list[str],
+    technical_score: float,
+    experience_score: float,
+    domain_score: float,
+    keyword_score: float,
+) -> list[str]:
+    """
+    Generate suggestions for improving match score.
+
+    Args:
+        missing_required: List of missing required skills
+        missing_preferred: List of missing preferred skills
+        technical_score: Technical skills score
+        experience_score: Experience score
+        domain_score: Domain score
+        keyword_score: Keyword score
+
+    Returns:
+        List of actionable suggestions
+    """
+    suggestions = []
+
+    # Suggest missing required skills (high priority)
+    if missing_required:
+        suggestions.append(
+            f"Add these required skills to your profile: {', '.join(missing_required[:5])}"
+        )
+
+    # Suggest missing preferred skills
+    if missing_preferred and len(suggestions) < 3:
+        suggestions.append(
+            f"Consider adding preferred skills: {', '.join(missing_preferred[:3])}"
+        )
+
+    # Score-based suggestions
+    if technical_score < 60:
+        suggestions.append(
+            "Focus on developing the technical skills mentioned in the job description"
+        )
+
+    if experience_score < 70:
+        suggestions.append(
+            "Highlight relevant project experience to demonstrate skills in practice"
+        )
+
+    if domain_score < 60:
+        suggestions.append(
+            "Emphasize any domain knowledge or industry experience related to this role"
+        )
+
+    if keyword_score < 60:
+        suggestions.append(
+            "Update your summary and achievements to include more keywords from the job posting"
+        )
+
+    # Limit to top 5 suggestions
+    return suggestions[:5]
