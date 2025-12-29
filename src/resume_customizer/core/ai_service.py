@@ -829,6 +829,223 @@ Remember:
 
         return True
 
+    def generate_custom_summary(
+        self,
+        profile_context: dict[str, Any],
+        job_context: dict[str, Any] | None = None,
+        style: str = "balanced",
+        use_cache: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Generate a customized professional summary for a resume.
+
+        This function creates a compelling 2-3 sentence professional summary
+        that highlights the most relevant skills and experience for the target
+        job. The summary is tailored to match job requirements while maintaining
+        truthfulness.
+
+        Args:
+            profile_context: Dictionary with profile information:
+                - top_skills: List of most relevant skills
+                - experience_years: Total years of experience
+                - top_achievements: List of key achievements
+                - current_title: Current or most recent job title
+                - domain: Primary domain or industry
+            job_context: Optional dictionary with job information:
+                - title: Target job title
+                - company: Target company name
+                - key_requirements: List of key job requirements
+                - industry: Target industry
+            style: Summary style - "technical", "results", or "balanced" (default)
+            use_cache: Whether to use cached responses (default: True)
+
+        Returns:
+            Dictionary with summary results:
+            {
+                "summary": str,
+                "style": str,
+                "keywords_included": [str, ...],
+                "word_count": int
+            }
+
+        Raises:
+            AIServiceError: If API call fails
+            ValueError: If style is invalid or required context is missing
+
+        Example:
+            >>> service = AIService()
+            >>> result = service.generate_custom_summary(
+            ...     profile_context={
+            ...         "top_skills": ["Python", "AWS", "Docker"],
+            ...         "experience_years": 5,
+            ...         "top_achievements": ["Built scalable API serving 1M users"],
+            ...         "current_title": "Senior Software Engineer",
+            ...         "domain": "Backend Development"
+            ...     },
+            ...     job_context={
+            ...         "title": "Lead Backend Engineer",
+            ...         "key_requirements": ["Python", "microservices", "cloud"]
+            ...     },
+            ...     style="technical"
+            ... )
+            >>> print(result["summary"])
+        """
+        # Validate style
+        valid_styles = ["technical", "results", "balanced"]
+        if style not in valid_styles:
+            raise ValueError(
+                f"Invalid style '{style}'. Must be one of: {', '.join(valid_styles)}"
+            )
+
+        # Validate required profile context
+        required_fields = ["top_skills", "experience_years", "current_title"]
+        for field in required_fields:
+            if field not in profile_context:
+                raise ValueError(f"Missing required profile_context field: {field}")
+
+        # Build system prompt based on style
+        style_instructions = {
+            "technical": "Emphasize technical expertise, technologies, and implementation skills. "
+            "Highlight specific tools, frameworks, and technical methodologies.",
+            "results": "Focus on measurable business impact, achievements, and outcomes. "
+            "Emphasize value delivered, improvements made, and quantifiable results.",
+            "balanced": "Balance technical expertise with business results. "
+            "Show both technical capabilities and the impact they've delivered.",
+        }
+
+        system_prompt = f"""You are an expert resume writer specializing in professional summaries.
+
+Your task is to create a compelling 2-3 sentence professional summary.
+
+REQUIREMENTS:
+1. LENGTH: Exactly 2-3 complete sentences (aim for 40-60 words total)
+2. TRUTHFULNESS: Only use information provided - no fabrication
+3. RELEVANCE: Prioritize information relevant to the target job
+4. IMPACT: Make it compelling and highlight unique value
+5. CLARITY: Use clear, professional language
+6. ATS-FRIENDLY: Include relevant keywords naturally
+
+Style: {style_instructions[style]}
+
+Return your response as a valid JSON object with this exact structure:
+{{
+  "summary": "The professional summary (2-3 sentences)",
+  "keywords_included": ["keyword1", "keyword2"],
+  "word_count": 45
+}}
+
+Only return the JSON object, no other text."""
+
+        # Build prompt with context
+        prompt_parts = ["Generate a professional summary with this information:\n"]
+
+        # Add profile context
+        prompt_parts.append(f"Title: {profile_context['current_title']}")
+        prompt_parts.append(f"Experience: {profile_context['experience_years']} years")
+        prompt_parts.append(f"Top Skills: {', '.join(profile_context['top_skills'][:5])}")
+
+        if "domain" in profile_context:
+            prompt_parts.append(f"Domain: {profile_context['domain']}")
+
+        if "top_achievements" in profile_context and profile_context["top_achievements"]:
+            achievements_text = "; ".join(profile_context["top_achievements"][:2])
+            prompt_parts.append(f"Key Achievements: {achievements_text}")
+
+        # Add job context if provided
+        if job_context:
+            prompt_parts.append("\nTarget Job:")
+            if "title" in job_context:
+                prompt_parts.append(f"Position: {job_context['title']}")
+            if "company" in job_context:
+                prompt_parts.append(f"Company: {job_context['company']}")
+            if "key_requirements" in job_context:
+                prompt_parts.append(
+                    f"Key Requirements: {', '.join(job_context['key_requirements'][:5])}"
+                )
+            if "industry" in job_context:
+                prompt_parts.append(f"Industry: {job_context['industry']}")
+
+        prompt_parts.append(
+            "\nCreate a summary that positions the candidate as ideal for this role."
+        )
+
+        prompt = "\n".join(prompt_parts)
+
+        try:
+            response = self.call_claude(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=512,
+                temperature=0.7,  # Higher creativity for compelling summaries
+                use_cache=use_cache,
+            )
+
+            # Parse JSON response
+            result = self._parse_summary_response(response)
+
+            # Add style to result
+            result["style"] = style
+
+            # Validate word count (should be 40-60 words for 2-3 sentences)
+            if result["word_count"] < 30 or result["word_count"] > 80:
+                logger.warning(
+                    f"Summary word count {result['word_count']} outside recommended range (40-60)"
+                )
+
+            logger.info(
+                f"Generated summary with {result['word_count']} words, "
+                f"{len(result['keywords_included'])} keywords"
+            )
+
+            return result
+
+        except (AIServiceError, json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Summary generation failed: {e}")
+            raise AIServiceError(f"Failed to generate summary: {e}") from e
+
+    def _parse_summary_response(self, response: str) -> dict[str, Any]:
+        """
+        Parse and validate Claude's JSON response for summary generation.
+
+        Args:
+            response: Raw response text from Claude
+
+        Returns:
+            Validated summary result dictionary
+
+        Raises:
+            json.JSONDecodeError: If response is not valid JSON
+            KeyError: If required fields are missing
+        """
+        # Extract JSON from response
+        response = response.strip()
+        start = response.find("{")
+        end = response.rfind("}") + 1
+
+        if start == -1 or end == 0:
+            raise json.JSONDecodeError("No JSON object found", response, 0)
+
+        json_str = response[start:end]
+        result = json.loads(json_str)
+
+        # Validate required fields
+        required_fields = ["summary", "keywords_included", "word_count"]
+        for field in required_fields:
+            if field not in result:
+                raise KeyError(f"Missing required field: {field}")
+
+        # Ensure keywords_included is a list
+        if not isinstance(result["keywords_included"], list):
+            result["keywords_included"] = []
+
+        # Ensure word_count is an integer
+        if not isinstance(result["word_count"], int):
+            # Try to extract from summary if not provided correctly
+            result["word_count"] = len(result["summary"].split())
+
+        return result
+
 
 # Singleton instance for convenience
 _ai_service: AIService | None = None

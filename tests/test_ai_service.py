@@ -918,6 +918,255 @@ class TestValidateMetricsPreserved:
         assert service._validate_metrics_preserved(original, rephrased) is True
 
 
+class TestSummaryGeneration:
+    """Test summary generation functionality."""
+
+    @pytest.fixture
+    def service(self, tmp_path):
+        """Create AI service with mocked client."""
+        with patch("resume_customizer.core.ai_service.Anthropic"):
+            return AIService(api_key="test-key", cache_dir=tmp_path)
+
+    @pytest.fixture
+    def profile_context(self):
+        """Sample profile context."""
+        return {
+            "top_skills": ["Python", "AWS", "Docker", "Kubernetes"],
+            "experience_years": 5,
+            "current_title": "Senior Software Engineer",
+            "domain": "Backend Development",
+            "top_achievements": [
+                "Built scalable API serving 1M users",
+                "Reduced infrastructure costs by 40%"
+            ]
+        }
+
+    @pytest.fixture
+    def job_context(self):
+        """Sample job context."""
+        return {
+            "title": "Lead Backend Engineer",
+            "company": "TechCorp",
+            "key_requirements": ["Python", "microservices", "cloud", "team leadership"],
+            "industry": "SaaS"
+        }
+
+    def test_generate_summary_success(self, service, profile_context, job_context):
+        """Test successful summary generation."""
+        mock_json_response = json.dumps({
+            "summary": "Senior Software Engineer with 5 years of experience in Backend Development, "
+                      "specializing in Python, AWS, and Docker. Built scalable API serving 1M users "
+                      "and reduced infrastructure costs by 40%.",
+            "keywords_included": ["Python", "AWS", "Docker", "scalable", "Backend Development"],
+            "word_count": 42
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            result = service.generate_custom_summary(
+                profile_context=profile_context,
+                job_context=job_context,
+                style="technical"
+            )
+
+            assert "summary" in result
+            assert result["word_count"] == 42
+            assert len(result["keywords_included"]) == 5
+            assert result["style"] == "technical"
+
+    def test_generate_summary_balanced_style(self, service, profile_context):
+        """Test summary generation with balanced style."""
+        mock_json_response = json.dumps({
+            "summary": "Experienced Senior Software Engineer with 5 years in Backend Development. "
+                      "Combines technical expertise in Python and AWS with proven results.",
+            "keywords_included": ["Python", "AWS", "Backend Development"],
+            "word_count": 28
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            result = service.generate_custom_summary(
+                profile_context=profile_context,
+                style="balanced"
+            )
+
+            assert result["style"] == "balanced"
+            assert "summary" in result
+
+    def test_generate_summary_results_style(self, service, profile_context, job_context):
+        """Test summary generation with results-focused style."""
+        mock_json_response = json.dumps({
+            "summary": "Results-driven Senior Software Engineer who built scalable API serving 1M users "
+                      "and reduced infrastructure costs by 40%. Proven track record of delivering impact.",
+            "keywords_included": ["scalable", "1M users", "40%", "impact"],
+            "word_count": 35
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            result = service.generate_custom_summary(
+                profile_context=profile_context,
+                job_context=job_context,
+                style="results"
+            )
+
+            assert result["style"] == "results"
+            assert "40%" in result["summary"]
+
+    def test_generate_summary_without_job_context(self, service, profile_context):
+        """Test summary generation without job context."""
+        mock_json_response = json.dumps({
+            "summary": "Senior Software Engineer with 5 years of Backend Development experience.",
+            "keywords_included": ["Backend Development"],
+            "word_count": 12
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            result = service.generate_custom_summary(
+                profile_context=profile_context
+            )
+
+            assert "summary" in result
+            assert result["style"] == "balanced"  # Default style
+
+    def test_generate_summary_invalid_style(self, service, profile_context):
+        """Test that invalid style raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid style"):
+            service.generate_custom_summary(
+                profile_context=profile_context,
+                style="invalid_style"
+            )
+
+    def test_generate_summary_missing_required_field(self, service):
+        """Test that missing required field raises ValueError."""
+        incomplete_context = {
+            "top_skills": ["Python"],
+            # Missing experience_years and current_title
+        }
+
+        with pytest.raises(ValueError, match="Missing required profile_context field"):
+            service.generate_custom_summary(profile_context=incomplete_context)
+
+    def test_generate_summary_word_count_warning(self, service, profile_context):
+        """Test warning when word count is outside recommended range."""
+        # Very short summary
+        mock_json_response = json.dumps({
+            "summary": "Short summary.",
+            "keywords_included": [],
+            "word_count": 2
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            result = service.generate_custom_summary(profile_context=profile_context)
+            # Should still return but log warning
+            assert result["word_count"] == 2
+
+    def test_generate_summary_api_failure(self, service, profile_context):
+        """Test handling of API failures."""
+        with patch.object(service, "call_claude", side_effect=AIServiceError("API failed")):
+            with pytest.raises(AIServiceError, match="Failed to generate summary"):
+                service.generate_custom_summary(profile_context=profile_context)
+
+    def test_generate_summary_invalid_json(self, service, profile_context):
+        """Test handling of invalid JSON response."""
+        with patch.object(service, "call_claude", return_value="Not valid JSON"):
+            with pytest.raises(AIServiceError, match="Failed to generate summary"):
+                service.generate_custom_summary(profile_context=profile_context)
+
+    def test_generate_summary_with_optional_fields(self, service):
+        """Test summary generation with minimal required fields."""
+        minimal_context = {
+            "top_skills": ["Python", "JavaScript"],
+            "experience_years": 3,
+            "current_title": "Software Engineer"
+            # No domain or achievements
+        }
+
+        mock_json_response = json.dumps({
+            "summary": "Software Engineer with 3 years of experience in Python and JavaScript.",
+            "keywords_included": ["Python", "JavaScript"],
+            "word_count": 12
+        })
+
+        with patch.object(service, "call_claude", return_value=mock_json_response):
+            result = service.generate_custom_summary(profile_context=minimal_context)
+            assert "summary" in result
+
+
+class TestParseSummaryResponse:
+    """Test summary response parsing."""
+
+    @pytest.fixture
+    def service(self, tmp_path):
+        """Create AI service."""
+        with patch("resume_customizer.core.ai_service.Anthropic"):
+            return AIService(api_key="test-key", cache_dir=tmp_path)
+
+    def test_parse_valid_summary_response(self, service):
+        """Test parsing valid summary response."""
+        response = json.dumps({
+            "summary": "Great professional summary here.",
+            "keywords_included": ["keyword1", "keyword2"],
+            "word_count": 5
+        })
+
+        result = service._parse_summary_response(response)
+
+        assert result["summary"] == "Great professional summary here."
+        assert len(result["keywords_included"]) == 2
+        assert result["word_count"] == 5
+
+    def test_parse_summary_with_extra_text(self, service):
+        """Test parsing response with extra text."""
+        response = """Here's your summary:
+
+{
+  "summary": "Professional summary text.",
+  "keywords_included": ["skill1"],
+  "word_count": 3
+}
+
+Hope this helps!"""
+
+        result = service._parse_summary_response(response)
+        assert result["summary"] == "Professional summary text."
+
+    def test_parse_summary_missing_json(self, service):
+        """Test error when JSON not found."""
+        with pytest.raises(json.JSONDecodeError, match="No JSON object found"):
+            service._parse_summary_response("No JSON here")
+
+    def test_parse_summary_missing_field(self, service):
+        """Test error when required field missing."""
+        response = json.dumps({
+            "summary": "Text",
+            # Missing other required fields
+        })
+
+        with pytest.raises(KeyError, match="Missing required field"):
+            service._parse_summary_response(response)
+
+    def test_parse_summary_invalid_keywords_type(self, service):
+        """Test that invalid keywords type is converted."""
+        response = json.dumps({
+            "summary": "Text",
+            "keywords_included": "not a list",  # Invalid
+            "word_count": 5
+        })
+
+        result = service._parse_summary_response(response)
+        assert result["keywords_included"] == []
+
+    def test_parse_summary_invalid_word_count(self, service):
+        """Test that invalid word count is calculated from summary."""
+        response = json.dumps({
+            "summary": "This is a test summary with words",
+            "keywords_included": [],
+            "word_count": "not an integer"  # Invalid
+        })
+
+        result = service._parse_summary_response(response)
+        # Should calculate from summary
+        assert result["word_count"] == 7
+
+
 class TestGetAIService:
     """Test singleton service getter."""
 
