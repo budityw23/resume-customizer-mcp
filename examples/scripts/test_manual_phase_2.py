@@ -29,10 +29,10 @@ def test_complete_workflow():
 
     # Step 1: Load profile
     print("Step 1: Loading user profile...")
-    print("File: examples/budi_resume.md")
+    print("File: examples/resumes/budi_resume.md")
 
     profile_result = handle_load_user_profile({
-        "file_path": "examples/budi_resume.md"
+        "file_path": "examples/resumes/budi_resume.md"
     })
 
     if profile_result.get("status") == "error":
@@ -47,10 +47,10 @@ def test_complete_workflow():
 
     # Step 2: Test with Backend Engineer job
     print_separator("Step 2: Testing with Senior Backend Engineer Job")
-    print("File: examples/senior_backend_job.md")
+    print("File: examples/jobs/senior_backend_job.md")
 
     job_result = handle_load_job_description({
-        "file_path": "examples/senior_backend_job.md"
+        "file_path": "examples/jobs/senior_backend_job.md"
     })
 
     if job_result.get("status") == "error":
@@ -109,10 +109,10 @@ def test_complete_workflow():
 
     # Step 4: Test with Full Stack Engineer job
     print_separator("Step 4: Testing with Full Stack Engineer Job")
-    print("File: examples/fullstack_engineer_job.md")
+    print("File: examples/jobs/fullstack_engineer_job.md")
 
     job_result2 = handle_load_job_description({
-        "file_path": "examples/fullstack_engineer_job.md"
+        "file_path": "examples/jobs/fullstack_engineer_job.md"
     })
 
     if job_result2.get("status") == "error":
