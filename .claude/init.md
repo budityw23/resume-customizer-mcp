@@ -6,6 +6,93 @@ This file contains custom instructions and guidelines for working on this projec
 
 This is an MCP (Model Context Protocol) server for AI-powered resume customization. The project uses Python 3.10+, follows Domain-Driven Design principles, and integrates with Claude AI for intelligent resume optimization.
 
+## Working Style with Claude Code
+
+### Response Guidelines
+- **Be Concise**: No summaries, explanations, or "What We Built" sections unless explicitly asked
+- **No New Docs**: Don't create documentation files unless explicitly requested
+- **Completion Format**: Just confirm completion with test results:
+  ```
+  Phase X.Y complete ✅
+  
+  Created/Modified:
+  - file1.py
+  - file2.py
+  
+  Tests: X/X passing
+  Coverage: XX%
+  Ruff: ✅
+  MyPy: ✅
+  ```
+- **No Code Examples**: Don't include usage examples in responses unless asked
+- **No "Next Steps"**: Don't suggest what to do next - I'll tell you
+- **Errors Only**: Only provide details if something failed
+
+### What TO Include
+- ✅ Implementation (code only)
+- ✅ Tests
+- ✅ Run linters and report results
+- ✅ Fix any issues found
+- ✅ Brief file list of what changed
+
+### What NOT to Include
+- ❌ Summaries of what was built
+- ❌ "How It Works" explanations
+- ❌ "Key Features" lists
+- ❌ Usage examples in responses
+- ❌ "Next Steps" suggestions
+- ❌ Creating README.md sections
+- ❌ Creating new documentation files
+- ❌ Verbose explanations
+
+### Example Workflow
+```
+User: "Implement Phase 5.1"
+
+Good Response:
+---
+Phase 5.1 complete ✅
+
+Created:
+- src/resume_customizer/generators/template_engine.py
+- templates/modern.html
+- templates/classic.html
+- tests/test_template_engine.py
+
+Tests: 31/31 passing
+Coverage: 89%
+Ruff: ✅
+MyPy: ✅
+---
+
+Bad Response:
+---
+Perfect! Phase 5.1 Template System is now complete! 🎉
+
+What We Built:
+1. Template Engine with amazing features...
+[500 lines of summary]
+
+Key Features:
+- Smart Data Merging...
+[More explanations]
+
+How It Works:
+```python
+[Code examples]
+```
+
+Next Steps:
+Would you like to...
+---
+```
+
+### When Verbose Responses Are OK
+- When debugging complex errors
+- When explicitly asked: "Explain how X works"
+- When explicitly asked: "Summarize what we've done"
+- When proposing architectural decisions
+
 ## Code Style and Standards
 
 ### Python Style

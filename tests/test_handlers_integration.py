@@ -13,6 +13,7 @@ import pytest
 from resume_customizer.mcp.handlers import (
     _session_state,
     handle_analyze_match,
+    handle_customize_resume,
     handle_load_job_description,
     handle_load_user_profile,
 )
@@ -44,11 +45,13 @@ def clear_session_state():
     _session_state["profiles"].clear()
     _session_state["jobs"].clear()
     _session_state["matches"].clear()
+    _session_state["customizations"].clear()
     yield
     # Clean up after test
     _session_state["profiles"].clear()
     _session_state["jobs"].clear()
     _session_state["matches"].clear()
+    _session_state["customizations"].clear()
 
 
 class TestLoadUserProfile:
@@ -340,3 +343,218 @@ class TestMatchQuality:
         # Scores should be descending
         scores = [ach["score"] for ach in top_achievements]
         assert scores == sorted(scores, reverse=True)
+
+
+class TestCustomizeResume:
+    """Test customize_resume handler (Phase 4.4)."""
+
+    def test_successful_customization(self, resume_file, job_file):
+        """Test successful resume customization workflow."""
+        # Step 1: Load profile
+        profile_result = handle_load_user_profile({"file_path": resume_file})
+        assert profile_result["status"] == "success"
+        profile_id = profile_result["profile_id"]
+
+        # Step 2: Load job
+        job_result = handle_load_job_description({"file_path": job_file})
+        assert job_result["status"] == "success"
+        job_id = job_result["job_id"]
+
+        # Step 3: Analyze match
+        match_result = handle_analyze_match({
+            "profile_id": profile_id,
+            "job_id": job_id,
+        })
+        assert match_result["status"] == "success"
+        match_id = match_result["match_id"]
+
+        # Step 4: Customize resume
+        customize_result = handle_customize_resume({
+            "match_id": match_id,
+        })
+
+        assert customize_result["status"] == "success"
+        assert "customization_id" in customize_result
+        assert customize_result["match_id"] == match_id
+        assert customize_result["profile_id"] == profile_id
+        assert customize_result["job_id"] == job_id
+        assert "created_at" in customize_result
+
+        # Verify metadata
+        assert customize_result["template"] == "modern"
+        assert customize_result["experiences_count"] >= 0
+        assert customize_result["skills_count"] >= 0
+        assert "metadata" in customize_result
+
+        # Verify it's stored in session
+        customization_id = customize_result["customization_id"]
+        assert customization_id in _session_state["customizations"]
+
+    def test_customize_with_preferences(self, resume_file, job_file):
+        """Test customization with custom preferences."""
+        # Load and match
+        profile_result = handle_load_user_profile({"file_path": resume_file})
+        job_result = handle_load_job_description({"file_path": job_file})
+        match_result = handle_analyze_match({
+            "profile_id": profile_result["profile_id"],
+            "job_id": job_result["job_id"],
+        })
+
+        # Customize with preferences
+        customize_result = handle_customize_resume({
+            "match_id": match_result["match_id"],
+            "preferences": {
+                "achievements_per_role": 5,
+                "max_skills": 10,
+                "template": "minimal",
+                "include_summary": False,
+            },
+        })
+
+        assert customize_result["status"] == "success"
+        assert customize_result["template"] == "minimal"
+        assert customize_result["include_summary"] is False
+
+    def test_customize_missing_match_id(self):
+        """Test customization without match_id parameter."""
+        result = handle_customize_resume({})
+
+        assert result["status"] == "error"
+        assert "missing" in result["message"].lower()
+        assert "match_id" in result["message"].lower()
+
+    def test_customize_nonexistent_match(self):
+        """Test customization with non-existent match_id."""
+        result = handle_customize_resume({
+            "match_id": "nonexistent-match",
+        })
+
+        assert result["status"] == "error"
+        assert "match not found" in result["message"].lower()
+
+    def test_customize_metadata_content(self, resume_file, job_file):
+        """Test that metadata contains expected information."""
+        # Setup workflow
+        profile_result = handle_load_user_profile({"file_path": resume_file})
+        job_result = handle_load_job_description({"file_path": job_file})
+        match_result = handle_analyze_match({
+            "profile_id": profile_result["profile_id"],
+            "job_id": job_result["job_id"],
+        })
+
+        # Customize
+        customize_result = handle_customize_resume({
+            "match_id": match_result["match_id"],
+        })
+
+        # Verify metadata structure
+        metadata = customize_result["metadata"]
+        assert "changes_count" in metadata
+        assert "achievements_reordered" in metadata
+        assert "skills_reordered" in metadata
+        assert isinstance(metadata["changes_count"], int)
+        assert metadata["changes_count"] >= 0
+
+        # Verify changes summary exists
+        assert "changes_summary" in customize_result
+        assert isinstance(customize_result["changes_summary"], list)
+
+    def test_multiple_customizations(self, resume_file, job_file):
+        """Test creating multiple customizations from same match."""
+        # Setup workflow
+        profile_result = handle_load_user_profile({"file_path": resume_file})
+        job_result = handle_load_job_description({"file_path": job_file})
+        match_result = handle_analyze_match({
+            "profile_id": profile_result["profile_id"],
+            "job_id": job_result["job_id"],
+        })
+        match_id = match_result["match_id"]
+
+        # Create two customizations with different preferences
+        custom1 = handle_customize_resume({
+            "match_id": match_id,
+            "preferences": {"template": "modern"},
+        })
+        custom2 = handle_customize_resume({
+            "match_id": match_id,
+            "preferences": {"template": "minimal"},
+        })
+
+        assert custom1["status"] == "success"
+        assert custom2["status"] == "success"
+        assert custom1["customization_id"] != custom2["customization_id"]
+
+        # Verify both are stored
+        assert len(_session_state["customizations"]) == 2
+
+
+class TestCompleteWorkflowWithCustomization:
+    """Test complete end-to-end workflow including customization."""
+
+    def test_full_workflow(self, resume_file, job_file):
+        """Test the complete workflow from loading to customization."""
+        # Step 1: Load profile
+        profile_result = handle_load_user_profile({"file_path": resume_file})
+        assert profile_result["status"] == "success"
+
+        # Step 2: Load job
+        job_result = handle_load_job_description({"file_path": job_file})
+        assert job_result["status"] == "success"
+
+        # Step 3: Analyze match
+        match_result = handle_analyze_match({
+            "profile_id": profile_result["profile_id"],
+            "job_id": job_result["job_id"],
+        })
+        assert match_result["status"] == "success"
+        assert match_result["overall_score"] > 0
+
+        # Step 4: Customize resume
+        customize_result = handle_customize_resume({
+            "match_id": match_result["match_id"],
+            "preferences": {
+                "achievements_per_role": 3,
+                "include_summary": True,
+            },
+        })
+        assert customize_result["status"] == "success"
+
+        # Verify complete state
+        assert len(_session_state["profiles"]) == 1
+        assert len(_session_state["jobs"]) == 1
+        assert len(_session_state["matches"]) == 1
+        assert len(_session_state["customizations"]) == 1
+
+        # Verify data consistency
+        assert customize_result["profile_id"] == profile_result["profile_id"]
+        assert customize_result["job_id"] == job_result["job_id"]
+        assert customize_result["match_id"] == match_result["match_id"]
+
+    def test_workflow_with_preferences_validation(self, resume_file, job_file):
+        """Test that preferences are properly applied."""
+        profile_result = handle_load_user_profile({"file_path": resume_file})
+        job_result = handle_load_job_description({"file_path": job_file})
+        match_result = handle_analyze_match({
+            "profile_id": profile_result["profile_id"],
+            "job_id": job_result["job_id"],
+        })
+
+        # Customize with specific preferences
+        customize_result = handle_customize_resume({
+            "match_id": match_result["match_id"],
+            "preferences": {
+                "achievements_per_role": 2,
+                "max_skills": 5,
+                "template": "elegant",
+                "include_summary": True,
+            },
+        })
+
+        assert customize_result["status"] == "success"
+        assert customize_result["template"] == "elegant"
+        assert customize_result["include_summary"] is True
+
+        # Verify customization in session
+        customization_id = customize_result["customization_id"]
+        stored_customization = _session_state["customizations"][customization_id]
+        assert stored_customization.template == "elegant"

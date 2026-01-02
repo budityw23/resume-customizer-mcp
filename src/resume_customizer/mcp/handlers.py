@@ -8,6 +8,10 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from resume_customizer.core.customizer import (
+    CustomizationPreferences,
+    customize_resume,
+)
 from resume_customizer.core.matcher import calculate_match_score
 from resume_customizer.parsers.markdown_parser import parse_job_description, parse_resume
 from resume_customizer.utils.logger import get_logger
@@ -253,18 +257,95 @@ def handle_customize_resume(arguments: dict[str, Any]) -> dict[str, Any]:
         Dictionary with customized resume data
     """
     match_id = arguments.get("match_id")
-    preferences = arguments.get("preferences", {})
-    logger.info(f"Customizing resume: match={match_id}, preferences={preferences}")
+    preferences_dict = arguments.get("preferences", {})
 
-    # TODO: Implement in Phase 4 - Use customization engine
-    # For now, return a stub response
-    return {
-        "status": "success",
-        "message": "Resume customized successfully (stub)",
-        "customization_id": "stub-customization-id",
-        "match_id": match_id,
-        "template": preferences.get("template", "modern"),
-    }
+    # Validate match_id
+    if not match_id:
+        return {
+            "status": "error",
+            "message": "Missing required parameter: match_id",
+        }
+
+    logger.info(f"Customizing resume: match={match_id}, preferences={preferences_dict}")
+
+    try:
+        # Retrieve match result from session state
+        match_result = _session_state["matches"].get(match_id)
+        if not match_result:
+            return {
+                "status": "error",
+                "message": f"Match not found: {match_id}. Please run analyze_match first.",
+            }
+
+        # Retrieve profile from session state
+        profile_id = match_result.profile_id
+        profile = _session_state["profiles"].get(profile_id)
+        if not profile:
+            return {
+                "status": "error",
+                "message": f"Profile not found: {profile_id}. Session state may be corrupted.",
+            }
+
+        # Parse preferences
+        preferences = None
+        if preferences_dict:
+            preferences = CustomizationPreferences(
+                achievements_per_role=preferences_dict.get("achievements_per_role", 3),
+                max_skills=preferences_dict.get("max_skills"),
+                template=preferences_dict.get("template", "modern"),
+                include_summary=preferences_dict.get("include_summary", True),
+            )
+
+        # Customize resume using the core logic
+        customized_resume = customize_resume(
+            user_profile=profile,
+            match_result=match_result,
+            preferences=preferences,
+        )
+
+        # Store in session state
+        _session_state["customizations"][customized_resume.customization_id] = customized_resume
+
+        logger.info(
+            f"Resume customized successfully: {customized_resume.customization_id} - "
+            f"{len(customized_resume.selected_experiences)} experiences, "
+            f"{len(customized_resume.reordered_skills)} skills"
+        )
+
+        # Format response
+        return {
+            "status": "success",
+            "message": f"Resume customized successfully for {profile.name}",
+            "customization_id": customized_resume.customization_id,
+            "match_id": match_id,
+            "profile_id": profile_id,
+            "job_id": customized_resume.job_id,
+            "created_at": customized_resume.created_at,
+            "template": customized_resume.template,
+            "experiences_count": len(customized_resume.selected_experiences),
+            "skills_count": len(customized_resume.reordered_skills),
+            "include_summary": customized_resume.customized_summary is not None,
+            "metadata": {
+                "changes_count": customized_resume.metadata.get("changes_count", 0),
+                "achievements_reordered": customized_resume.metadata.get("achievements_reordered", 0),
+                "skills_reordered": customized_resume.metadata.get("skills_reordered", 0),
+            },
+            "changes_summary": customized_resume.metadata.get("changes_log", {}),  # Full changes log
+        }
+
+    except ValueError as e:
+        # Handle validation errors (e.g., fabricated achievements/skills)
+        logger.error(f"Validation error customizing resume: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Validation error: {str(e)}",
+        }
+    except Exception as e:
+        logger.error(f"Error customizing resume: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error customizing resume: {str(e)}",
+        }
 
 
 def handle_generate_resume_files(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -277,25 +358,93 @@ def handle_generate_resume_files(arguments: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Dictionary with generated file paths
     """
+    from pathlib import Path
+
+    from ..generators.template_engine import TemplateEngine
+
     customization_id = arguments.get("customization_id")
-    output_formats = arguments.get("output_formats", ["pdf", "docx"])
+    output_formats = arguments.get("output_formats", ["pdf"])
     output_directory = arguments.get("output_directory", "./output")
+    template = arguments.get("template")  # Optional override
+    filename_prefix = arguments.get("filename_prefix", "resume")
+
     logger.info(
         f"Generating resume files: customization={customization_id}, "
         f"formats={output_formats}, output_dir={output_directory}"
     )
 
-    # TODO: Implement in Phase 5 - Use document generators
-    # For now, return a stub response
-    return {
-        "status": "success",
-        "message": "Resume files generated successfully (stub)",
-        "customization_id": customization_id,
-        "generated_files": {
-            "pdf": f"{output_directory}/resume-stub.pdf" if "pdf" in output_formats else None,
-            "docx": f"{output_directory}/resume-stub.docx" if "docx" in output_formats else None,
-        },
-    }
+    # Validate customization_id
+    if not customization_id:
+        return {
+            "status": "error",
+            "message": "Missing required field: customization_id",
+        }
+
+    # Get customization from session state
+    if customization_id not in _session_state["customizations"]:
+        return {
+            "status": "error",
+            "message": f"Customization not found: {customization_id}",
+        }
+
+    customized_resume = _session_state["customizations"][customization_id]
+
+    # Get user profile from session state
+    profile_id = customized_resume.profile_id
+    if profile_id not in _session_state["profiles"]:
+        return {
+            "status": "error",
+            "message": f"Profile not found: {profile_id}",
+        }
+
+    user_profile = _session_state["profiles"][profile_id]
+
+    # Determine template to use
+    template_name = template or customized_resume.template
+
+    # Create output directory
+    output_path = Path(output_directory)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Generate files
+    generated_files: dict[str, str | None] = {}
+    try:
+        engine = TemplateEngine()
+
+        # Generate PDF
+        if "pdf" in output_formats:
+            pdf_filename = f"{filename_prefix}_{customization_id[:8]}.pdf"
+            pdf_path = output_path / pdf_filename
+            engine.generate_pdf(
+                customized_resume, user_profile, pdf_path, template_name
+            )
+            generated_files["pdf"] = str(pdf_path.absolute())
+            logger.info(f"Generated PDF: {pdf_path}")
+
+        # Generate DOCX
+        if "docx" in output_formats:
+            docx_filename = f"{filename_prefix}_{customization_id[:8]}.docx"
+            docx_path = output_path / docx_filename
+            engine.generate_docx(
+                customized_resume, user_profile, docx_path, template_name
+            )
+            generated_files["docx"] = str(docx_path.absolute())
+            logger.info(f"Generated DOCX: {docx_path}")
+
+        return {
+            "status": "success",
+            "message": f"Generated {len([f for f in generated_files.values() if f])} file(s)",
+            "customization_id": customization_id,
+            "template": template_name,
+            "generated_files": generated_files,
+        }
+
+    except Exception as e:
+        logger.error(f"Error generating resume files: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error generating files: {str(e)}",
+        }
 
 
 def handle_list_customizations(arguments: dict[str, Any]) -> dict[str, Any]:

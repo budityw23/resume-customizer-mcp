@@ -109,12 +109,23 @@ GENERATE_RESUME_FILES_TOOL = Tool(
             "output_formats": {
                 "type": "array",
                 "items": {"type": "string", "enum": ["pdf", "docx"]},
-                "description": "Output file formats to generate",
-                "default": ["pdf", "docx"],
+                "description": "Output file formats to generate (default: ['pdf'])",
+                "default": ["pdf"],
             },
             "output_directory": {
                 "type": "string",
-                "description": "Directory to save the generated files",
+                "description": "Directory to save the generated files (default: './output')",
+                "default": "./output",
+            },
+            "template": {
+                "type": "string",
+                "enum": ["modern", "classic", "ats_optimized"],
+                "description": "Template to use (default: uses customization's template)",
+            },
+            "filename_prefix": {
+                "type": "string",
+                "description": "Prefix for generated filenames (default: 'resume')",
+                "default": "resume",
             },
         },
         "required": ["customization_id"],

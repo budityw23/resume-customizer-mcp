@@ -9,6 +9,17 @@ from pathlib import Path
 import pytest
 
 from resume_customizer.config import Config
+from resume_customizer.core.models import (
+    Achievement,
+    ContactInfo,
+    Education,
+    Experience,
+    MatchBreakdown,
+    MatchResult,
+    Skill,
+    SkillMatch,
+    UserProfile,
+)
 
 
 @pytest.fixture
@@ -168,3 +179,119 @@ We're looking for an experienced backend engineer to join our platform team.
 - PostgreSQL or similar relational database
 - Docker containerization
 """
+
+
+@pytest.fixture
+def complete_profile() -> UserProfile:
+    """Create a complete profile with experiences and skills."""
+    return UserProfile(
+        name="Jane Developer",
+        contact=ContactInfo(email="jane@example.com", phone="555-0100"),
+        summary="Experienced software engineer with 5 years of experience",
+        experiences=[
+            Experience(
+                company="Tech Corp",
+                title="Senior Software Engineer",
+                start_date="2022-01",
+                end_date="Present",
+                achievements=[
+                    Achievement(
+                        text="Led team of 5 engineers to deliver critical microservices platform",
+                        technologies=["Python", "Docker", "Kubernetes"],
+                        metrics=["5 engineers", "3 months"],
+                        relevance_score=95.0,
+                    ),
+                    Achievement(
+                        text="Reduced API latency by 40% through caching optimization",
+                        technologies=["Redis", "Python"],
+                        metrics=["40%"],
+                        relevance_score=85.0,
+                    ),
+                    Achievement(
+                        text="Implemented CI/CD pipeline reducing deployment time by 60%",
+                        technologies=["GitLab CI", "Docker"],
+                        metrics=["60%"],
+                        relevance_score=80.0,
+                    ),
+                ],
+            ),
+            Experience(
+                company="StartupXYZ",
+                title="Software Engineer",
+                start_date="2020-01",
+                end_date="2021-12",
+                achievements=[
+                    Achievement(
+                        text="Developed real-time analytics dashboard using React",
+                        technologies=["React", "WebSockets"],
+                        metrics=[],
+                        relevance_score=75.0,
+                    ),
+                    Achievement(
+                        text="Mentored 2 junior engineers on best practices",
+                        technologies=[],
+                        metrics=["2 engineers"],
+                        relevance_score=70.0,
+                    ),
+                ],
+            ),
+        ],
+        skills=[
+            Skill(name="Python", category="Programming", proficiency="Expert", years=5),
+            Skill(name="JavaScript", category="Programming", proficiency="Advanced", years=4),
+            Skill(name="React", category="Frontend", proficiency="Advanced", years=3),
+            Skill(name="Docker", category="DevOps", proficiency="Intermediate", years=2),
+            Skill(name="Redis", category="Database", proficiency="Intermediate", years=2),
+        ],
+        education=[
+            Education(
+                degree="Bachelor of Science in Computer Science",
+                institution="Stanford University",
+                graduation_year="2017",
+                gpa="3.8",
+            )
+        ],
+    )
+
+
+@pytest.fixture
+def complete_match_result(complete_profile: UserProfile) -> MatchResult:
+    """Create a complete match result."""
+    # Collect all achievements with scores
+    ranked = [
+        (complete_profile.experiences[0].achievements[0], 95.0),  # Leadership
+        (complete_profile.experiences[0].achievements[1], 85.0),  # Performance
+        (complete_profile.experiences[0].achievements[2], 80.0),  # CI/CD
+        (complete_profile.experiences[1].achievements[0], 75.0),  # Dashboard
+        (complete_profile.experiences[1].achievements[1], 70.0),  # Mentoring
+    ]
+
+    return MatchResult(
+        profile_id="profile-123",
+        job_id="job-456",
+        overall_score=85,
+        breakdown=MatchBreakdown(
+            technical_skills_score=90.0,
+            experience_score=85.0,
+            domain_score=80.0,
+            keyword_coverage_score=75.0,
+            total_score=85.0,
+        ),
+        matched_skills=[
+            SkillMatch(
+                skill="Python",
+                matched=True,
+                category="required",
+                user_proficiency="Expert",
+            ),
+            SkillMatch(
+                skill="React",
+                matched=True,
+                category="preferred",
+                user_proficiency="Advanced",
+            ),
+        ],
+        missing_required_skills=[],
+        missing_preferred_skills=["Kubernetes", "Terraform"],
+        ranked_achievements=ranked,
+    )
