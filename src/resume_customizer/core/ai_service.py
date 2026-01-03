@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from anthropic import Anthropic, APIError, RateLimitError, APIConnectionError
+from anthropic import Anthropic, APIConnectionError, APIError, RateLimitError
 from dotenv import load_dotenv
 
 from resume_customizer.utils.logger import get_logger
@@ -245,7 +245,7 @@ class AIService:
             return None
 
         try:
-            with open(cache_file, "r", encoding="utf-8") as f:
+            with open(cache_file, encoding="utf-8") as f:
                 cache_data = json.load(f)
 
             # Check if cache has expired
@@ -313,7 +313,7 @@ class AIService:
         count = 0
         for cache_file in self.cache_dir.glob("*.json"):
             try:
-                with open(cache_file, "r", encoding="utf-8") as f:
+                with open(cache_file, encoding="utf-8") as f:
                     cache_data = json.load(f)
 
                 cached_time = datetime.fromisoformat(cache_data["timestamp"])

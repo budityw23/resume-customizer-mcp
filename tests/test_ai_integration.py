@@ -467,7 +467,7 @@ class TestQualityComparison:
             )
 
             # Template approach would be generic
-            template_result = f"Improved system performance using API and scaling"
+            template_result = "Improved system performance using API and scaling"
 
             # AI version should be more specific and impactful
             assert len(ai_result["rephrased"]) > len(template_result)

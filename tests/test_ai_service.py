@@ -5,13 +5,11 @@ Tests cover API calling, caching, retry logic, and error handling.
 """
 
 import json
-import time
 from datetime import datetime, timedelta
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 import pytest
-from anthropic import APIError, RateLimitError, APIConnectionError
+from anthropic import APIConnectionError, APIError, RateLimitError
 
 from resume_customizer.core.ai_service import AIService, AIServiceError, get_ai_service
 

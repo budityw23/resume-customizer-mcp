@@ -12,11 +12,61 @@ from resume_customizer.core.customizer import (
     CustomizationPreferences,
     customize_resume,
 )
+from resume_customizer.core.exceptions import (
+    ParseError,
+    ResourceNotFoundError,
+    ResumeCustomizerError,
+    ValidationError,
+)
 from resume_customizer.core.matcher import calculate_match_score
 from resume_customizer.parsers.markdown_parser import parse_job_description, parse_resume
+from resume_customizer.storage.database import CustomizationDatabase
 from resume_customizer.utils.logger import get_logger
+from resume_customizer.utils.validation import (
+    validate_file_path,
+    validate_id,
+)
 
 logger = get_logger(__name__)
+
+
+def _format_error_response(error: Exception) -> dict[str, Any]:
+    """
+    Format an exception into a consistent error response.
+
+    Args:
+        error: The exception to format
+
+    Returns:
+        Dictionary with error details
+    """
+    if isinstance(error, ResumeCustomizerError):
+        response = {
+            "status": "error",
+            "message": error.message,
+        }
+        if error.suggestion:
+            response["suggestion"] = error.suggestion
+        return response
+
+    # For unexpected errors, return generic message
+    logger.error(f"Unexpected error: {str(error)}", exc_info=True)
+    return {
+        "status": "error",
+        "message": f"An unexpected error occurred: {str(error)}",
+        "suggestion": "Please check the logs for more details or contact support.",
+    }
+
+# Global database instance
+_database: CustomizationDatabase | None = None
+
+
+def _get_database() -> CustomizationDatabase:
+    """Get or create the global database instance."""
+    global _database
+    if _database is None:
+        _database = CustomizationDatabase()
+    return _database
 
 # Session state to store loaded profiles, jobs, and results
 _session_state: dict[str, Any] = {
@@ -37,19 +87,17 @@ def handle_load_user_profile(arguments: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Dictionary with parsed profile data
     """
-    file_path = arguments.get("file_path")
-
-    if not file_path:
-        return {
-            "status": "error",
-            "message": "Missing required parameter: file_path",
-        }
-
-    logger.info(f"Loading user profile from: {file_path}")
-
     try:
+        # Validate file path
+        file_path = validate_file_path(arguments.get("file_path"))
+
+        logger.info(f"Loading user profile from: {file_path}")
+
         # Parse the resume
-        profile = parse_resume(file_path)
+        try:
+            profile = parse_resume(file_path)
+        except Exception as parse_error:
+            raise ParseError(file_path, str(parse_error)) from parse_error
 
         # Generate a unique profile ID if not present
         if not profile.profile_id:
@@ -73,18 +121,10 @@ def handle_load_user_profile(arguments: dict[str, Any]) -> dict[str, Any]:
             "experiences_count": len(profile.experiences),
         }
 
-    except FileNotFoundError:
-        logger.error(f"File not found: {file_path}")
-        return {
-            "status": "error",
-            "message": f"File not found: {file_path}",
-        }
+    except (ValidationError, ParseError, ResumeCustomizerError) as e:
+        return _format_error_response(e)
     except Exception as e:
-        logger.error(f"Error loading profile: {str(e)}")
-        return {
-            "status": "error",
-            "message": f"Error loading profile: {str(e)}",
-        }
+        return _format_error_response(e)
 
 
 def handle_load_job_description(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -97,19 +137,17 @@ def handle_load_job_description(arguments: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Dictionary with parsed job data
     """
-    file_path = arguments.get("file_path")
-
-    if not file_path:
-        return {
-            "status": "error",
-            "message": "Missing required parameter: file_path",
-        }
-
-    logger.info(f"Loading job description from: {file_path}")
-
     try:
+        # Validate file path
+        file_path = validate_file_path(arguments.get("file_path"))
+
+        logger.info(f"Loading job description from: {file_path}")
+
         # Parse the job description
-        job = parse_job_description(file_path)
+        try:
+            job = parse_job_description(file_path)
+        except Exception as parse_error:
+            raise ParseError(file_path, str(parse_error)) from parse_error
 
         # Generate a unique job ID if not present
         if not job.job_id:
@@ -134,18 +172,10 @@ def handle_load_job_description(arguments: dict[str, Any]) -> dict[str, Any]:
             "preferred_skills_count": len(job.requirements.preferred_skills),
         }
 
-    except FileNotFoundError:
-        logger.error(f"File not found: {file_path}")
-        return {
-            "status": "error",
-            "message": f"File not found: {file_path}",
-        }
+    except (ValidationError, ParseError, ResumeCustomizerError) as e:
+        return _format_error_response(e)
     except Exception as e:
-        logger.error(f"Error loading job description: {str(e)}")
-        return {
-            "status": "error",
-            "message": f"Error loading job description: {str(e)}",
-        }
+        return _format_error_response(e)
 
 
 def handle_analyze_match(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -158,40 +188,24 @@ def handle_analyze_match(arguments: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Dictionary with match analysis results
     """
-    profile_id = arguments.get("profile_id")
-    job_id = arguments.get("job_id")
-
-    # Validate inputs
-    if not profile_id:
-        return {
-            "status": "error",
-            "message": "Missing required parameter: profile_id",
-        }
-
-    if not job_id:
-        return {
-            "status": "error",
-            "message": "Missing required parameter: job_id",
-        }
-
-    logger.info(f"Analyzing match: profile={profile_id}, job={job_id}")
-
     try:
+        # Validate inputs
+        profile_id = validate_id(
+            arguments.get("profile_id"), "profile_id", "profile"
+        )
+        job_id = validate_id(arguments.get("job_id"), "job_id", "job")
+
+        logger.info(f"Analyzing match: profile={profile_id}, job={job_id}")
+
         # Retrieve profile from session state
         profile = _session_state["profiles"].get(profile_id)
         if not profile:
-            return {
-                "status": "error",
-                "message": f"Profile not found: {profile_id}. Please load a profile first using load_user_profile.",
-            }
+            raise ResourceNotFoundError("profile", profile_id)
 
         # Retrieve job from session state
         job = _session_state["jobs"].get(job_id)
         if not job:
-            return {
-                "status": "error",
-                "message": f"Job description not found: {job_id}. Please load a job description first using load_job_description.",
-            }
+            raise ResourceNotFoundError("job", job_id)
 
         # Calculate match score
         match_result = calculate_match_score(profile, job)
@@ -238,12 +252,10 @@ def handle_analyze_match(arguments: dict[str, Any]) -> dict[str, Any]:
             ],
         }
 
+    except (ValidationError, ResourceNotFoundError, ResumeCustomizerError) as e:
+        return _format_error_response(e)
     except Exception as e:
-        logger.error(f"Error analyzing match: {str(e)}")
-        return {
-            "status": "error",
-            "message": f"Error analyzing match: {str(e)}",
-        }
+        return _format_error_response(e)
 
 
 def handle_customize_resume(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -305,6 +317,40 @@ def handle_customize_resume(arguments: dict[str, Any]) -> dict[str, Any]:
 
         # Store in session state
         _session_state["customizations"][customized_resume.customization_id] = customized_resume
+
+        # Also store in database
+        try:
+            # Get job info for database
+            job = _session_state["jobs"].get(customized_resume.job_id)
+            job_title = job.title if job else "Unknown"
+            company = job.company if job else "Unknown"
+
+            # Get match result for overall score
+            match_result = customized_resume.match_result
+            overall_score = match_result.overall_score if match_result else 0
+
+            # Ensure customization_id is not None
+            customization_id = customized_resume.customization_id
+            if not customization_id:
+                raise ValueError("Customization ID is required")
+
+            db = _get_database()
+            db.insert_customization(
+                customization_id=customization_id,
+                profile_id=customized_resume.profile_id,
+                job_id=customized_resume.job_id,
+                profile_name=profile.name,
+                job_title=job_title,
+                company=company,
+                overall_score=overall_score,
+                template=customized_resume.template,
+                created_at=customized_resume.created_at or datetime.now().isoformat(),
+                metadata=customized_resume.metadata,
+            )
+            logger.info(f"Saved customization to database: {customized_resume.customization_id}")
+        except Exception as db_error:
+            # Don't fail the customization if database save fails
+            logger.warning(f"Failed to save customization to database: {str(db_error)}")
 
         logger.info(
             f"Resume customized successfully: {customized_resume.customization_id} - "
@@ -458,17 +504,39 @@ def handle_list_customizations(arguments: dict[str, Any]) -> dict[str, Any]:
         Dictionary with list of customizations
     """
     filter_by_company = arguments.get("filter_by_company")
+    filter_by_date_range = arguments.get("filter_by_date_range", {})
     limit = arguments.get("limit", 10)
-    logger.info(f"Listing customizations: company={filter_by_company}, limit={limit}")
 
-    # TODO: Implement in Phase 6 - Use database
-    # For now, return a stub response
-    return {
-        "status": "success",
-        "message": "Customizations listed successfully (stub)",
-        "count": 0,
-        "customizations": [],
-    }
+    start_date = filter_by_date_range.get("start_date") if filter_by_date_range else None
+    end_date = filter_by_date_range.get("end_date") if filter_by_date_range else None
+
+    logger.info(
+        f"Listing customizations: company={filter_by_company}, "
+        f"dates={start_date} to {end_date}, limit={limit}"
+    )
+
+    try:
+        db = _get_database()
+        customizations = db.get_customizations(
+            company=filter_by_company,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+        )
+
+        return {
+            "status": "success",
+            "message": f"Found {len(customizations)} customization(s)",
+            "count": len(customizations),
+            "customizations": customizations,
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing customizations: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error listing customizations: {str(e)}",
+        }
 
 
 # Mapping of tool names to handler functions
