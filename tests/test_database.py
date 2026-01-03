@@ -83,6 +83,35 @@ class TestDatabaseInitialization:
 class TestInsertCustomization:
     """Test inserting customization records."""
 
+    @pytest.fixture(autouse=True)
+    def setup_foreign_keys(self, database: CustomizationDatabase) -> None:
+        """Set up profile and job for foreign key constraints."""
+        database.insert_profile(
+            profile_id="profile-456",
+            name="John Doe",
+            email="john@example.com",
+            full_data={"name": "John Doe"},
+        )
+        database.insert_job(
+            job_id="job-789",
+            title="Senior Software Engineer",
+            company="TechCorp",
+            full_data={"title": "Engineer"},
+        )
+        # For test_insert_without_metadata
+        database.insert_profile(
+            profile_id="profile-1",
+            name="Jane Smith",
+            email="jane@example.com",
+            full_data={"name": "Jane Smith"},
+        )
+        database.insert_job(
+            job_id="job-1",
+            title="Developer",
+            company="StartupXYZ",
+            full_data={"title": "Developer"},
+        )
+
     def test_insert_customization(
         self, database: CustomizationDatabase, sample_customization: dict
     ) -> None:
@@ -124,6 +153,20 @@ class TestGetCustomizations:
         self, database: CustomizationDatabase, sample_customization: dict
     ) -> None:
         """Insert test data before each test."""
+        # Set up required profiles and jobs
+        database.insert_profile(
+            profile_id="profile-456",
+            name="John Doe",
+            email="john@example.com",
+            full_data={"name": "John Doe"},
+        )
+        database.insert_job(
+            job_id="job-789",
+            title="Senior Software Engineer",
+            company="TechCorp",
+            full_data={"title": "Engineer"},
+        )
+
         # Insert multiple customizations with variations
         for i in range(5):
             custom = sample_customization.copy()
@@ -183,6 +226,22 @@ class TestGetCustomizations:
 class TestGetCustomizationById:
     """Test getting a single customization."""
 
+    @pytest.fixture(autouse=True)
+    def setup_foreign_keys(self, database: CustomizationDatabase) -> None:
+        """Set up profile and job for foreign key constraints."""
+        database.insert_profile(
+            profile_id="profile-456",
+            name="John Doe",
+            email="john@example.com",
+            full_data={"name": "John Doe"},
+        )
+        database.insert_job(
+            job_id="job-789",
+            title="Senior Software Engineer",
+            company="TechCorp",
+            full_data={"title": "Engineer"},
+        )
+
     def test_get_existing_customization(
         self, database: CustomizationDatabase, sample_customization: dict
     ) -> None:
@@ -202,6 +261,22 @@ class TestGetCustomizationById:
 
 class TestDeleteCustomization:
     """Test deleting customizations."""
+
+    @pytest.fixture(autouse=True)
+    def setup_foreign_keys(self, database: CustomizationDatabase) -> None:
+        """Set up profile and job for foreign key constraints."""
+        database.insert_profile(
+            profile_id="profile-456",
+            name="John Doe",
+            email="john@example.com",
+            full_data={"name": "John Doe"},
+        )
+        database.insert_job(
+            job_id="job-789",
+            title="Senior Software Engineer",
+            company="TechCorp",
+            full_data={"title": "Engineer"},
+        )
 
     def test_delete_existing_customization(
         self, database: CustomizationDatabase, sample_customization: dict
@@ -228,6 +303,19 @@ class TestContextManager:
     def test_context_manager(self, test_db_path: Path) -> None:
         """Test using database as context manager."""
         with CustomizationDatabase(test_db_path) as db:
+            # Set up profile and job first
+            db.insert_profile(
+                profile_id="profile-1",
+                name="Test User",
+                email="test@example.com",
+                full_data={"name": "Test User"},
+            )
+            db.insert_job(
+                job_id="job-1",
+                title="Engineer",
+                company="TestCorp",
+                full_data={"title": "Engineer"},
+            )
             db.insert_customization(
                 customization_id="ctx-test",
                 profile_id="profile-1",
@@ -244,3 +332,336 @@ class TestContextManager:
         with CustomizationDatabase(test_db_path) as db:
             result = db.get_customization_by_id("ctx-test")
             assert result is not None
+
+
+class TestProfileOperations:
+    """Test profile CRUD operations."""
+
+    @pytest.fixture
+    def sample_profile_data(self) -> dict:
+        """Sample profile data for testing."""
+        return {
+            "profile_id": "profile-abc123",
+            "name": "John Doe",
+            "email": "john.doe@example.com",
+            "phone": "+1-555-0100",
+            "location": "San Francisco, CA",
+            "linkedin": "https://linkedin.com/in/johndoe",
+            "github": "https://github.com/johndoe",
+            "website": "https://johndoe.dev",
+            "summary": "Experienced software engineer",
+            "skills_count": 25,
+            "experiences_count": 3,
+            "education_count": 1,
+            "certifications_count": 2,
+            "full_data": {"name": "John Doe", "skills": []},
+        }
+
+    def test_insert_profile(
+        self, database: CustomizationDatabase, sample_profile_data: dict
+    ) -> None:
+        """Test inserting a profile."""
+        database.insert_profile(**sample_profile_data)
+
+        result = database.get_profile("profile-abc123")
+        assert result is not None
+        assert result["name"] == "John Doe"
+        assert result["email"] == "john.doe@example.com"
+        assert result["skills_count"] == 25
+        assert result["full_data"]["name"] == "John Doe"
+
+    def test_insert_profile_with_minimal_data(
+        self, database: CustomizationDatabase
+    ) -> None:
+        """Test inserting profile with only required fields."""
+        database.insert_profile(
+            profile_id="profile-min",
+            name="Jane Smith",
+            email="jane@example.com",
+            full_data={"name": "Jane Smith"},
+        )
+
+        result = database.get_profile("profile-min")
+        assert result is not None
+        assert result["phone"] is None
+        assert result["linkedin"] is None
+
+    def test_get_nonexistent_profile(self, database: CustomizationDatabase) -> None:
+        """Test getting a non-existent profile."""
+        result = database.get_profile("nonexistent")
+        assert result is None
+
+    def test_update_profile(
+        self, database: CustomizationDatabase, sample_profile_data: dict
+    ) -> None:
+        """Test updating a profile."""
+        database.insert_profile(**sample_profile_data)
+
+        # Update profile
+        updated = database.update_profile(
+            profile_id="profile-abc123",
+            full_data={"name": "John Doe Updated", "skills": ["Python"]},
+            name="John Doe Updated",
+            skills_count=30,
+        )
+
+        assert updated is True
+
+        result = database.get_profile("profile-abc123")
+        assert result is not None
+        assert result["name"] == "John Doe Updated"
+        assert result["skills_count"] == 30
+        assert result["email"] == "john.doe@example.com"  # Unchanged
+        assert result["created_at"] != result["updated_at"]  # updated_at changed
+
+    def test_update_nonexistent_profile(self, database: CustomizationDatabase) -> None:
+        """Test updating a non-existent profile."""
+        updated = database.update_profile(
+            profile_id="nonexistent",
+            full_data={"name": "Nobody"},
+        )
+        assert updated is False
+
+    def test_delete_profile(
+        self, database: CustomizationDatabase, sample_profile_data: dict
+    ) -> None:
+        """Test deleting a profile."""
+        database.insert_profile(**sample_profile_data)
+        assert database.get_profile("profile-abc123") is not None
+
+        deleted = database.delete_profile("profile-abc123")
+        assert deleted is True
+        assert database.get_profile("profile-abc123") is None
+
+    def test_delete_nonexistent_profile(self, database: CustomizationDatabase) -> None:
+        """Test deleting a non-existent profile."""
+        deleted = database.delete_profile("nonexistent")
+        assert deleted is False
+
+
+class TestJobOperations:
+    """Test job CRUD operations."""
+
+    @pytest.fixture
+    def sample_job_data(self) -> dict:
+        """Sample job data for testing."""
+        return {
+            "job_id": "job-xyz789",
+            "title": "Senior Software Engineer",
+            "company": "TechCorp Inc.",
+            "location": "Remote",
+            "job_type": "Full-time",
+            "experience_level": "Senior",
+            "salary_range": "$150k-$200k",
+            "required_skills_count": 8,
+            "preferred_skills_count": 5,
+            "full_data": {"title": "Senior Software Engineer", "requirements": {}},
+        }
+
+    def test_insert_job(
+        self, database: CustomizationDatabase, sample_job_data: dict
+    ) -> None:
+        """Test inserting a job."""
+        database.insert_job(**sample_job_data)
+
+        result = database.get_job("job-xyz789")
+        assert result is not None
+        assert result["title"] == "Senior Software Engineer"
+        assert result["company"] == "TechCorp Inc."
+        assert result["required_skills_count"] == 8
+        assert result["full_data"]["title"] == "Senior Software Engineer"
+
+    def test_insert_job_with_minimal_data(
+        self, database: CustomizationDatabase
+    ) -> None:
+        """Test inserting job with only required fields."""
+        database.insert_job(
+            job_id="job-min",
+            title="Developer",
+            company="StartupXYZ",
+            full_data={"title": "Developer", "company": "StartupXYZ"},
+        )
+
+        result = database.get_job("job-min")
+        assert result is not None
+        assert result["location"] is None
+        assert result["salary_range"] is None
+
+    def test_get_nonexistent_job(self, database: CustomizationDatabase) -> None:
+        """Test getting a non-existent job."""
+        result = database.get_job("nonexistent")
+        assert result is None
+
+    def test_update_job(
+        self, database: CustomizationDatabase, sample_job_data: dict
+    ) -> None:
+        """Test updating a job."""
+        database.insert_job(**sample_job_data)
+
+        # Update job
+        updated = database.update_job(
+            job_id="job-xyz789",
+            full_data={"title": "Staff Engineer", "company": "TechCorp Inc."},
+            title="Staff Engineer",
+            required_skills_count=10,
+        )
+
+        assert updated is True
+
+        result = database.get_job("job-xyz789")
+        assert result is not None
+        assert result["title"] == "Staff Engineer"
+        assert result["required_skills_count"] == 10
+        assert result["company"] == "TechCorp Inc."  # Unchanged
+        assert result["created_at"] != result["updated_at"]
+
+    def test_update_nonexistent_job(self, database: CustomizationDatabase) -> None:
+        """Test updating a non-existent job."""
+        updated = database.update_job(
+            job_id="nonexistent",
+            full_data={"title": "None"},
+        )
+        assert updated is False
+
+    def test_delete_job(
+        self, database: CustomizationDatabase, sample_job_data: dict
+    ) -> None:
+        """Test deleting a job."""
+        database.insert_job(**sample_job_data)
+        assert database.get_job("job-xyz789") is not None
+
+        deleted = database.delete_job("job-xyz789")
+        assert deleted is True
+        assert database.get_job("job-xyz789") is None
+
+    def test_delete_nonexistent_job(self, database: CustomizationDatabase) -> None:
+        """Test deleting a non-existent job."""
+        deleted = database.delete_job("nonexistent")
+        assert deleted is False
+
+
+class TestMatchOperations:
+    """Test match result CRUD operations."""
+
+    @pytest.fixture
+    def sample_match_data(self) -> dict:
+        """Sample match result data for testing."""
+        return {
+            "match_id": "match-def456",
+            "profile_id": "profile-abc123",
+            "job_id": "job-xyz789",
+            "overall_score": 85,
+            "technical_score": 90,
+            "experience_score": 80,
+            "domain_score": 85,
+            "keyword_coverage": 75,
+            "matched_skills_count": 12,
+            "missing_skills_count": 3,
+            "full_data": {
+                "overall_score": 85,
+                "breakdown": {},
+                "matched_skills": [],
+            },
+        }
+
+    @pytest.fixture(autouse=True)
+    def setup_foreign_keys(
+        self, database: CustomizationDatabase
+    ) -> None:
+        """Set up profile and job for foreign key constraints."""
+        database.insert_profile(
+            profile_id="profile-abc123",
+            name="John Doe",
+            email="john@example.com",
+            full_data={"name": "John Doe"},
+        )
+        database.insert_job(
+            job_id="job-xyz789",
+            title="Engineer",
+            company="TechCorp",
+            full_data={"title": "Engineer"},
+        )
+
+    def test_insert_match(
+        self, database: CustomizationDatabase, sample_match_data: dict
+    ) -> None:
+        """Test inserting a match result."""
+        database.insert_match(**sample_match_data)
+
+        result = database.get_match("match-def456")
+        assert result is not None
+        assert result["overall_score"] == 85
+        assert result["technical_score"] == 90
+        assert result["matched_skills_count"] == 12
+        assert result["full_data"]["overall_score"] == 85
+
+    def test_get_nonexistent_match(self, database: CustomizationDatabase) -> None:
+        """Test getting a non-existent match."""
+        result = database.get_match("nonexistent")
+        assert result is None
+
+    def test_delete_match(
+        self, database: CustomizationDatabase, sample_match_data: dict
+    ) -> None:
+        """Test deleting a match result."""
+        database.insert_match(**sample_match_data)
+        assert database.get_match("match-def456") is not None
+
+        deleted = database.delete_match("match-def456")
+        assert deleted is True
+        assert database.get_match("match-def456") is None
+
+    def test_delete_nonexistent_match(self, database: CustomizationDatabase) -> None:
+        """Test deleting a non-existent match."""
+        deleted = database.delete_match("nonexistent")
+        assert deleted is False
+
+
+class TestForeignKeyConstraints:
+    """Test foreign key constraints."""
+
+    def test_foreign_keys_enabled(self, database: CustomizationDatabase) -> None:
+        """Test that foreign keys are enabled."""
+        cursor = database.conn.cursor()  # type: ignore
+        cursor.execute("PRAGMA foreign_keys")
+        result = cursor.fetchone()
+        assert result[0] == 1  # Foreign keys should be ON
+
+    def test_cannot_delete_profile_with_customization(
+        self, database: CustomizationDatabase
+    ) -> None:
+        """Test that profile with customizations cannot be deleted due to FK constraint."""
+        import sqlite3
+
+        # Insert profile, job, customization
+        database.insert_profile(
+            profile_id="profile-fk",
+            name="Test User",
+            email="test@example.com",
+            full_data={"name": "Test"},
+        )
+        database.insert_job(
+            job_id="job-fk",
+            title="Engineer",
+            company="Corp",
+            full_data={"title": "Eng"},
+        )
+        database.insert_customization(
+            customization_id="custom-fk",
+            profile_id="profile-fk",
+            job_id="job-fk",
+            profile_name="Test User",
+            job_title="Engineer",
+            company="Corp",
+            overall_score=80,
+            template="modern",
+            created_at="2024-01-15T10:00:00",
+        )
+
+        # Try to delete profile with customization - should fail with FK constraint
+        with pytest.raises(sqlite3.IntegrityError):
+            database.delete_profile("profile-fk")
+
+        # Customization should still exist (FK prevented the delete)
+        custom = database.get_customization_by_id("custom-fk")
+        assert custom is not None

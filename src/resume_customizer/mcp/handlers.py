@@ -68,7 +68,22 @@ def _get_database() -> CustomizationDatabase:
         _database = CustomizationDatabase()
     return _database
 
-# Session state to store loaded profiles, jobs, and results
+
+# Global session manager instance
+_session_manager: Any = None
+
+
+def _get_session_manager() -> Any:
+    """Get or create the global session manager instance."""
+    global _session_manager
+    if _session_manager is None:
+        from resume_customizer.storage.session import SessionManager
+
+        _session_manager = SessionManager(default_ttl=3600)  # 1 hour TTL
+    return _session_manager
+
+
+# Legacy session state dict (for backward compatibility during migration)
 _session_state: dict[str, Any] = {
     "profiles": {},
     "jobs": {},
@@ -106,8 +121,37 @@ def handle_load_user_profile(arguments: dict[str, Any]) -> dict[str, Any]:
         if not profile.created_at:
             profile.created_at = datetime.now().isoformat()
 
-        # Store in session state
+        # Store in session using SessionManager
+        session = _get_session_manager()
+        session.set_profile(profile.profile_id, profile)
+
+        # Also keep in legacy dict for backward compatibility
         _session_state["profiles"][profile.profile_id] = profile
+
+        # Also save to database
+        try:
+            db = _get_database()
+            db.insert_profile(
+                profile_id=profile.profile_id,
+                name=profile.name,
+                email=profile.contact.email,
+                full_data=profile.to_dict(),
+                phone=profile.contact.phone,
+                location=profile.contact.location,
+                linkedin=profile.contact.linkedin,
+                github=profile.contact.github,
+                website=profile.contact.portfolio,
+                summary=profile.summary,
+                skills_count=len(profile.skills),
+                experiences_count=len(profile.experiences),
+                education_count=len(profile.education),
+                certifications_count=len(profile.certifications),
+                created_at=profile.created_at,
+            )
+            logger.info(f"Saved profile to database: {profile.profile_id}")
+        except Exception as db_error:
+            # Don't fail the load if database save fails
+            logger.warning(f"Failed to save profile to database: {str(db_error)}")
 
         logger.info(f"Profile loaded successfully: {profile.profile_id}")
 
@@ -156,8 +200,33 @@ def handle_load_job_description(arguments: dict[str, Any]) -> dict[str, Any]:
         if not job.created_at:
             job.created_at = datetime.now().isoformat()
 
-        # Store in session state
+        # Store in session using SessionManager
+        session = _get_session_manager()
+        session.set_job(job.job_id, job)
+
+        # Also keep in legacy dict for backward compatibility
         _session_state["jobs"][job.job_id] = job
+
+        # Also save to database
+        try:
+            db = _get_database()
+            db.insert_job(
+                job_id=job.job_id,
+                title=job.title,
+                company=job.company,
+                full_data=job.to_dict(),
+                location=job.location,
+                job_type=job.job_type,
+                experience_level=job.experience_level,
+                salary_range=job.salary_range,
+                required_skills_count=len(job.requirements.required_skills),
+                preferred_skills_count=len(job.requirements.preferred_skills),
+                created_at=job.created_at,
+            )
+            logger.info(f"Saved job to database: {job.job_id}")
+        except Exception as db_error:
+            # Don't fail the load if database save fails
+            logger.warning(f"Failed to save job to database: {str(db_error)}")
 
         logger.info(f"Job description loaded successfully: {job.job_id}")
 
@@ -197,13 +266,18 @@ def handle_analyze_match(arguments: dict[str, Any]) -> dict[str, Any]:
 
         logger.info(f"Analyzing match: profile={profile_id}, job={job_id}")
 
-        # Retrieve profile from session state
-        profile = _session_state["profiles"].get(profile_id)
+        # Retrieve profile from session (try SessionManager first, fall back to legacy)
+        session = _get_session_manager()
+        profile = session.get_profile(profile_id)
+        if not profile:
+            profile = _session_state["profiles"].get(profile_id)
         if not profile:
             raise ResourceNotFoundError("profile", profile_id)
 
-        # Retrieve job from session state
-        job = _session_state["jobs"].get(job_id)
+        # Retrieve job from session (try SessionManager first, fall back to legacy)
+        job = session.get_job(job_id)
+        if not job:
+            job = _session_state["jobs"].get(job_id)
         if not job:
             raise ResourceNotFoundError("job", job_id)
 
@@ -214,8 +288,34 @@ def handle_analyze_match(arguments: dict[str, Any]) -> dict[str, Any]:
         match_id = f"match-{uuid.uuid4().hex[:8]}"
         match_result.created_at = datetime.now().isoformat()
 
-        # Store in session state
+        # Store in session using SessionManager
+        session = _get_session_manager()
+        session.set_match(match_id, match_result)
+
+        # Also keep in legacy dict for backward compatibility
         _session_state["matches"][match_id] = match_result
+
+        # Also save to database
+        try:
+            db = _get_database()
+            db.insert_match(
+                match_id=match_id,
+                profile_id=profile_id,
+                job_id=job_id,
+                overall_score=match_result.overall_score,
+                technical_score=int(match_result.breakdown.technical_skills_score),
+                experience_score=int(match_result.breakdown.experience_score),
+                domain_score=int(match_result.breakdown.domain_score),
+                keyword_coverage=int(match_result.breakdown.keyword_coverage_score),
+                matched_skills_count=len(match_result.matched_skills),
+                missing_skills_count=len(match_result.missing_required_skills),
+                full_data=match_result.to_dict(),
+                created_at=match_result.created_at,
+            )
+            logger.info(f"Saved match result to database: {match_id}")
+        except Exception as db_error:
+            # Don't fail the match if database save fails
+            logger.warning(f"Failed to save match to database: {str(db_error)}")
 
         logger.info(
             f"Match analysis completed: {match_id} - Score: {match_result.overall_score}%"
@@ -281,8 +381,11 @@ def handle_customize_resume(arguments: dict[str, Any]) -> dict[str, Any]:
     logger.info(f"Customizing resume: match={match_id}, preferences={preferences_dict}")
 
     try:
-        # Retrieve match result from session state
-        match_result = _session_state["matches"].get(match_id)
+        # Retrieve match result from session (try SessionManager first)
+        session = _get_session_manager()
+        match_result = session.get_match(match_id)
+        if not match_result:
+            match_result = _session_state["matches"].get(match_id)
         if not match_result:
             return {
                 "status": "error",
@@ -315,8 +418,16 @@ def handle_customize_resume(arguments: dict[str, Any]) -> dict[str, Any]:
             preferences=preferences,
         )
 
-        # Store in session state
-        _session_state["customizations"][customized_resume.customization_id] = customized_resume
+        # Store in session using SessionManager
+        session = _get_session_manager()
+        session.set_customization(
+            customized_resume.customization_id, customized_resume
+        )
+
+        # Also keep in legacy dict for backward compatibility
+        _session_state["customizations"][
+            customized_resume.customization_id
+        ] = customized_resume
 
         # Also store in database
         try:
@@ -426,24 +537,27 @@ def handle_generate_resume_files(arguments: dict[str, Any]) -> dict[str, Any]:
             "message": "Missing required field: customization_id",
         }
 
-    # Get customization from session state
-    if customization_id not in _session_state["customizations"]:
+    # Get customization from session (try SessionManager first)
+    session = _get_session_manager()
+    customized_resume = session.get_customization(customization_id)
+    if not customized_resume:
+        customized_resume = _session_state["customizations"].get(customization_id)
+    if not customized_resume:
         return {
             "status": "error",
             "message": f"Customization not found: {customization_id}",
         }
 
-    customized_resume = _session_state["customizations"][customization_id]
-
-    # Get user profile from session state
+    # Get user profile from session (try SessionManager first)
     profile_id = customized_resume.profile_id
-    if profile_id not in _session_state["profiles"]:
+    user_profile = session.get_profile(profile_id)
+    if not user_profile:
+        user_profile = _session_state["profiles"].get(profile_id)
+    if not user_profile:
         return {
             "status": "error",
             "message": f"Profile not found: {profile_id}",
         }
-
-    user_profile = _session_state["profiles"][profile_id]
 
     # Determine template to use
     template_name = template or customized_resume.template
