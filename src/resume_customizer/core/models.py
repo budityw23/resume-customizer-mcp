@@ -54,6 +54,7 @@ class Achievement:
     technologies: list[str] = field(default_factory=list)
     metrics: list[str] = field(default_factory=list)
     relevance_score: float = 0.0
+    rephrased_text: str | None = None  # AI-rephrased version for display
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -62,6 +63,7 @@ class Achievement:
             "technologies": self.technologies,
             "metrics": self.metrics,
             "relevance_score": self.relevance_score,
+            "rephrased_text": self.rephrased_text,
         }
 
     @classmethod
@@ -72,6 +74,7 @@ class Achievement:
             technologies=data.get("technologies", []),
             metrics=data.get("metrics", []),
             relevance_score=data.get("relevance_score", 0.0),
+            rephrased_text=data.get("rephrased_text"),
         )
 
 
@@ -436,10 +439,11 @@ class JobDescription:
 class SkillMatch:
     """Matching information for a single skill."""
 
-    skill: str
+    skill: str          # Job's required/preferred skill name
     matched: bool
-    category: str  # required/preferred
+    category: str       # "required" or "preferred"
     user_proficiency: str | None = None
+    user_skill_name: str | None = None  # User's actual skill name (may differ via synonym)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -448,6 +452,7 @@ class SkillMatch:
             "matched": self.matched,
             "category": self.category,
             "user_proficiency": self.user_proficiency,
+            "user_skill_name": self.user_skill_name,
         }
 
     @classmethod
@@ -458,6 +463,7 @@ class SkillMatch:
             matched=data["matched"],
             category=data["category"],
             user_proficiency=data.get("user_proficiency"),
+            user_skill_name=data.get("user_skill_name"),
         )
 
 

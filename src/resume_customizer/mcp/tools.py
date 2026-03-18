@@ -40,6 +40,26 @@ LOAD_JOB_DESCRIPTION_TOOL = Tool(
     },
 )
 
+ANALYZE_JOB_FROM_TEXT_TOOL = Tool(
+    name="analyze_job_from_text",
+    description=(
+        "Parse a raw job description from copy-pasted text (no file needed). "
+        "Uses AI to extract the job title, company, required/preferred skills, "
+        "responsibilities, and all other structured fields. "
+        "Returns a job_id that can be used directly with analyze_match."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "Raw job description text copied from a job posting",
+            }
+        },
+        "required": ["text"],
+    },
+)
+
 ANALYZE_MATCH_TOOL = Tool(
     name="analyze_match",
     description="Analyze how well a user profile matches a job description",
@@ -86,8 +106,17 @@ CUSTOMIZE_RESUME_TOOL = Tool(
                     "summary_style": {
                         "type": "string",
                         "enum": ["technical", "results", "balanced"],
-                        "description": "Style for the professional summary",
+                        "description": "Style for the AI-generated professional summary",
                         "default": "balanced",
+                    },
+                    "drop_irrelevant_experiences": {
+                        "type": "boolean",
+                        "description": "Drop experience entries that have no relevant achievements for this job",
+                        "default": False,
+                    },
+                    "max_skills": {
+                        "type": "integer",
+                        "description": "Maximum number of skills to include (default: all)",
                     },
                 },
             },
@@ -162,6 +191,7 @@ LIST_CUSTOMIZATIONS_TOOL = Tool(
 ALL_TOOLS = [
     LOAD_USER_PROFILE_TOOL,
     LOAD_JOB_DESCRIPTION_TOOL,
+    ANALYZE_JOB_FROM_TEXT_TOOL,
     ANALYZE_MATCH_TOOL,
     CUSTOMIZE_RESUME_TOOL,
     GENERATE_RESUME_FILES_TOOL,

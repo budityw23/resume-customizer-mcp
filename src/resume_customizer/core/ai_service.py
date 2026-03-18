@@ -1046,6 +1046,113 @@ Only return the JSON object, no other text."""
         return result
 
 
+    def parse_job_from_text(
+        self,
+        raw_text: str,
+        use_cache: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Parse a raw job description (copy-pasted text) into structured data.
+
+        Uses Claude to extract job title, company, required/preferred skills,
+        responsibilities, and other fields from free-form text.
+
+        IMPORTANT: required_skills and preferred_skills are returned as individual
+        skill/technology names, NOT as full sentences.
+
+        Args:
+            raw_text: Raw job description text from a job posting
+            use_cache: Whether to use cached responses (default: True)
+
+        Returns:
+            Dictionary with structured job data:
+            {
+                "title": str,
+                "company": str,
+                "location": str | None,
+                "job_type": str | None,
+                "experience_level": str | None,
+                "salary_range": str | None,
+                "description": str,
+                "responsibilities": [str, ...],
+                "required_skills": ["Python", "AWS", ...],   # individual skill names
+                "preferred_skills": ["Kubernetes", ...],
+                "technical_stack": ["Python", "PostgreSQL", ...],
+                "required_experience_years": int | None,
+                "required_education": str | None,
+                "company_description": str | None
+            }
+
+        Raises:
+            AIServiceError: If parsing fails
+        """
+        system_prompt = """You are an expert at parsing job descriptions into structured data.
+
+Extract all available information from the job posting.
+
+CRITICAL rules for required_skills and preferred_skills:
+- List INDIVIDUAL skill/technology names only: "Python", "AWS", "Docker", "React"
+- Do NOT include full sentences like "5+ years of Python experience"
+- Do NOT include education requirements (e.g., "Bachelor's degree") — those go in required_education
+- Do NOT include soft skills (e.g., "strong communication") — only hard technical skills/tools
+- Experience years go in required_experience_years as an integer
+- If a technology appears in the description/responsibilities but not listed as required, include it in technical_stack
+
+Return a valid JSON object with this exact structure:
+{
+  "title": "Job Title",
+  "company": "Company Name",
+  "location": "City, State / Remote / null",
+  "job_type": "Full-time / Part-time / Contract / null",
+  "experience_level": "Junior / Mid / Senior / Lead / null",
+  "salary_range": "$120k-$150k / null",
+  "description": "1-3 sentence role summary",
+  "responsibilities": ["Write clean, maintainable code", "Design system architecture"],
+  "required_skills": ["Python", "PostgreSQL", "AWS", "Docker"],
+  "preferred_skills": ["Kubernetes", "Go", "Terraform"],
+  "technical_stack": ["Python", "PostgreSQL", "AWS", "Docker", "Redis"],
+  "required_experience_years": 5,
+  "required_education": "Bachelor's in Computer Science or related field",
+  "company_description": "Brief description of the company"
+}
+
+Only return the JSON object, no other text."""
+
+        prompt = f"Parse this job description:\n\n{raw_text}"
+
+        try:
+            response = self.call_claude(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model="claude-sonnet-4-20250514",
+                max_tokens=2048,
+                temperature=0.1,
+                use_cache=use_cache,
+            )
+
+            response = response.strip()
+            start = response.find("{")
+            end = response.rfind("}") + 1
+            if start == -1 or end == 0:
+                raise AIServiceError("No JSON object in response")
+
+            parsed = json.loads(response[start:end])
+
+            # Ensure list fields are lists
+            for field in ("responsibilities", "required_skills", "preferred_skills", "technical_stack"):
+                if not isinstance(parsed.get(field), list):
+                    parsed[field] = []
+
+            logger.info(
+                f"Parsed job from text: '{parsed.get('title')}' at '{parsed.get('company')}', "
+                f"{len(parsed['required_skills'])} required skills"
+            )
+            return parsed
+
+        except (AIServiceError, json.JSONDecodeError, KeyError) as e:
+            raise AIServiceError(f"Failed to parse job description: {e}") from e
+
+
 # Singleton instance for convenience
 _ai_service: AIService | None = None
 

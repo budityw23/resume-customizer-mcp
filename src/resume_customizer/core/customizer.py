@@ -386,19 +386,25 @@ def _calculate_skill_relevance_score(
     """
     skill_name_lower = skill.name.lower()
 
+    def _names_match(match: SkillMatch) -> bool:
+        """Compare user's skill against a match entry by both job-side and user-side name."""
+        if match.user_skill_name and match.user_skill_name.lower() == skill_name_lower:
+            return True
+        return match.skill.lower() == skill_name_lower
+
     # Check if skill matched a required skill
     for match in matched_skills:
-        if match.skill.lower() == skill_name_lower and match.category == "required":
+        if _names_match(match) and match.category == "required":
             return 100.0  # Required match - highest priority
 
     # Check if skill matched a preferred skill
     for match in matched_skills:
-        if match.skill.lower() == skill_name_lower and match.category == "preferred":
+        if _names_match(match) and match.category == "preferred":
             return 80.0  # Preferred match - high priority
 
     # Check if skill matched any job skill
     for match in matched_skills:
-        if match.skill.lower() == skill_name_lower and match.matched:
+        if _names_match(match) and match.matched:
             return 60.0  # General match - medium priority
 
     # Skill not mentioned in job - low relevance
@@ -675,6 +681,8 @@ class CustomizationPreferences:
     max_skills: int | None = None  # Maximum skills to show (None = all)
     template: str = "modern"  # Template to use (modern, classic, ats)
     include_summary: bool = True  # Include customized summary
+    summary_style: str = "balanced"  # AI summary style: technical / results / balanced
+    drop_irrelevant_experiences: bool = False  # Drop experiences with zero selected achievements
     skills_strategy: SkillsDisplayStrategy | None = None  # Custom skills strategy
     achievement_strategy: AchievementSelection | None = None  # Custom achievement strategy
 
@@ -742,6 +750,14 @@ def customize_resume(
     selected_experiences = reorder_achievements(
         user_profile, match_result, achievement_strategy
     )
+
+    # Optionally drop experiences that have no relevant achievements after selection
+    if preferences.drop_irrelevant_experiences:
+        before = len(selected_experiences)
+        selected_experiences = [exp for exp in selected_experiences if exp.achievements]
+        dropped = before - len(selected_experiences)
+        if dropped:
+            logger.info(f"Dropped {dropped} experience(s) with no relevant achievements")
 
     # Phase 4.2: Optimize skills
     skills_strategy = preferences.skills_strategy or SkillsDisplayStrategy(
@@ -837,20 +853,23 @@ def _generate_changes_log(
         len(exp.achievements) for exp in customized_experiences
     )
 
-    # Track achievement changes per experience
+    # Track achievement changes per experience.
+    # Use company+title lookup to handle dropped experiences gracefully.
     achievement_changes = []
-    for orig_exp, custom_exp in zip(
-        original_profile.experiences, customized_experiences, strict=True
-    ):
-        if len(orig_exp.achievements) != len(custom_exp.achievements):
+    custom_by_key = {
+        (exp.company, exp.title): exp for exp in customized_experiences
+    }
+    for orig_exp in original_profile.experiences:
+        custom_exp = custom_by_key.get((orig_exp.company, orig_exp.title))
+        customized_count = len(custom_exp.achievements) if custom_exp else 0
+        if len(orig_exp.achievements) != customized_count:
             achievement_changes.append(
                 {
                     "company": orig_exp.company,
                     "title": orig_exp.title,
                     "original_count": len(orig_exp.achievements),
-                    "customized_count": len(custom_exp.achievements),
-                    "removed_count": len(orig_exp.achievements)
-                    - len(custom_exp.achievements),
+                    "customized_count": customized_count,
+                    "removed_count": len(orig_exp.achievements) - customized_count,
                 }
             )
 
@@ -858,9 +877,7 @@ def _generate_changes_log(
     skills_reordered = False
     if len(customized_skills) == len(original_profile.skills):
         # Same count - check if order changed
-        for orig, custom in zip(
-            original_profile.skills, customized_skills, strict=True
-        ):
+        for orig, custom in zip(original_profile.skills, customized_skills):
             if orig.name != custom.name:
                 skills_reordered = True
                 break
@@ -913,12 +930,10 @@ def _validate_no_data_loss(
     if customized_resume.job_id != customized_resume.match_result.job_id:
         raise ValueError("Job ID mismatch in customized resume")
 
-    # Validate experiences count matches
-    if len(customized_resume.selected_experiences) != len(
-        original_profile.experiences
-    ):
+    # Validate selected experiences are a subset of (not more than) original
+    if len(customized_resume.selected_experiences) > len(original_profile.experiences):
         raise ValueError(
-            f"Experience count mismatch: original has {len(original_profile.experiences)}, "
+            f"Experience count exceeds original: original has {len(original_profile.experiences)}, "
             f"customized has {len(customized_resume.selected_experiences)}"
         )
 

@@ -7,8 +7,10 @@ This module implements:
 - Phase 2.3: Match scoring with weighted components and gap analysis
 """
 
+import functools
 import re
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,7 @@ from rapidfuzz import fuzz
 
 from resume_customizer.core.models import (
     Achievement,
+    Experience,
     JobDescription,
     MatchBreakdown,
     MatchResult,
@@ -46,6 +49,58 @@ def get_nlp() -> spacy.language.Language:
             )
             raise
     return _nlp
+
+
+def _parse_date(date_str: str) -> date | None:
+    """
+    Parse a date string into a date object.
+
+    Supports: "Present", "YYYY-MM", "MM/YYYY", "Month YYYY", "YYYY".
+
+    Args:
+        date_str: Date string to parse
+
+    Returns:
+        date object or None if unparseable
+    """
+    if not date_str:
+        return None
+    date_str = date_str.strip()
+    if date_str.lower() in ("present", "current", "now"):
+        return date.today()
+    for fmt in ("%Y-%m", "%m/%Y", "%B %Y", "%b %Y"):
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+    # Try bare year
+    try:
+        year = int(date_str[:4])
+        if 1950 <= year <= 2100:
+            return date(year, 1, 1)
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def calculate_experience_years(experiences: list[Experience]) -> float:
+    """
+    Calculate total years of experience from actual start/end dates.
+
+    Args:
+        experiences: List of Experience objects
+
+    Returns:
+        Total years as a float
+    """
+    total_months = 0
+    for exp in experiences:
+        start = _parse_date(exp.start_date)
+        end = _parse_date(exp.end_date)
+        if start and end:
+            months = (end.year - start.year) * 12 + (end.month - start.month)
+            total_months += max(0, months)
+    return total_months / 12.0
 
 
 @dataclass
@@ -227,6 +282,16 @@ class SkillMatcher:
         if self._check_hierarchy(norm_user, norm_required):
             return True
 
+        # 7. If required_skill is a full sentence (e.g. "5+ years of Python experience"),
+        #    check if the user's skill name appears as a word within it.
+        if len(norm_required.split()) > 3:
+            pattern = r"\b" + re.escape(norm_user) + r"\b"
+            if re.search(pattern, norm_required):
+                logger.debug(
+                    f"Sentence containment: '{user_skill}' found in requirement '{required_skill[:60]}'"
+                )
+                return True
+
         return False
 
     def _check_hierarchy(self, user_skill: str, required_skill: str) -> bool:
@@ -275,19 +340,23 @@ class SkillMatcher:
         return False
 
     def match_skills(
-        self, user_skills: list[Skill], required_skills: list[str]
+        self,
+        user_skills: list[Skill],
+        required_skills: list[str],
+        category: str = "required",
     ) -> tuple[list[SkillMatch], list[str]]:
         """
-        Match user skills against required skills.
+        Match user skills against a list of required or preferred skills.
 
         Args:
             user_skills: List of user's skills from profile
-            required_skills: List of required skill names from job description
+            required_skills: List of skill names to match against
+            category: Label for matched skills — "required" or "preferred"
 
         Returns:
             Tuple of (matched_skills, missing_skills):
             - matched_skills: List of SkillMatch objects with match details
-            - missing_skills: List of required skills not found in user profile
+            - missing_skills: Skills from required_skills not found in user profile
 
         Examples:
             >>> user_skills = [Skill(name="Python", category="language", proficiency="expert")]
@@ -308,18 +377,17 @@ class SkillMatcher:
 
             for user_skill in user_skill_names:
                 if self.match_skill(user_skill, required):
-                    # Find user's proficiency level for this skill
                     user_prof = next(
                         (s.proficiency for s in user_skills if s.name == user_skill),
-                        None
+                        None,
                     )
-
                     matched.append(
                         SkillMatch(
                             skill=required,
                             matched=True,
-                            category="required",
+                            category=category,
                             user_proficiency=user_prof,
+                            user_skill_name=user_skill,
                         )
                     )
                     match_found = True
@@ -329,7 +397,7 @@ class SkillMatcher:
                 missing.append(required)
 
         logger.info(
-            f"Skill matching: {len(matched)}/{len(required_skills)} matched, "
+            f"Skill matching ({category}): {len(matched)}/{len(required_skills)} matched, "
             f"{len(missing)} missing"
         )
 
@@ -402,13 +470,21 @@ class SkillMatcher:
 # ============================================================================
 
 
-def extract_keywords(text: str, include_pos: list[str] | None = None) -> list[str]:
+@functools.lru_cache(maxsize=512)
+def extract_keywords(
+    text: str,
+    include_pos: tuple[str, ...] = ("NOUN", "VERB", "PROPN"),
+) -> list[str]:
     """
     Extract keywords from text using spaCy NLP.
 
+    Results are cached by text content so the same text is never processed
+    twice in the same process (avoids repeated spaCy calls in the achievement loop
+    and across multiple score sub-functions that use the same job text).
+
     Args:
         text: Text to extract keywords from
-        include_pos: Part-of-speech tags to include (default: NOUN, VERB, PROPN)
+        include_pos: Part-of-speech tags to include (tuple for hashability)
 
     Returns:
         List of extracted keywords (lemmatized)
@@ -417,9 +493,6 @@ def extract_keywords(text: str, include_pos: list[str] | None = None) -> list[st
         >>> extract_keywords("Built scalable microservices using Python and Docker")
         ['build', 'scalable', 'microservice', 'python', 'docker']
     """
-    if include_pos is None:
-        include_pos = ["NOUN", "VERB", "PROPN"]
-
     nlp = get_nlp()
     doc = nlp(text)
 
@@ -431,6 +504,7 @@ def extract_keywords(text: str, include_pos: list[str] | None = None) -> list[st
     return keywords
 
 
+@functools.lru_cache(maxsize=512)
 def extract_technical_terms(text: str) -> list[str]:
     """
     Extract technical terms and technologies from text.
@@ -476,6 +550,7 @@ def extract_technical_terms(text: str) -> list[str]:
     return list({t.lower() for t in terms if len(t) > 1})
 
 
+@functools.lru_cache(maxsize=512)
 def extract_metrics(text: str) -> list[str]:
     """
     Extract metrics and quantifiable achievements.
@@ -517,7 +592,7 @@ def extract_metrics(text: str) -> list[str]:
 def rank_achievements(
     achievements: list[Achievement],
     job_description: JobDescription,
-    user_profile: UserProfile | None = None,
+    achievement_dates: dict[str, str] | None = None,
 ) -> list[RankedAchievement]:
     """
     Rank achievements by relevance to job description.
@@ -531,7 +606,7 @@ def rank_achievements(
     Args:
         achievements: List of achievements to rank
         job_description: Target job description
-        user_profile: User's profile (optional, used for recency calculation)
+        achievement_dates: Optional mapping of achievement text -> experience start_date string
 
     Returns:
         List of ranked achievements with scores and reasons, sorted by score descending
@@ -586,9 +661,22 @@ def rank_achievements(
             score += 20
             reasons.append(f"Contains {len(achievement_metrics)} metrics")
 
-        # 4. Recency bonus (10%)
-        # Note: Achievement model doesn't have year field, this would need to come from Experience
-        # For now, we skip recency bonus at achievement level
+        # 4. Recency bonus (10%) — based on parent experience start date
+        if achievement_dates:
+            start_date_str = achievement_dates.get(achievement.text, "")
+            exp_date = _parse_date(start_date_str)
+            if exp_date:
+                years_ago = (date.today() - exp_date).days / 365.25
+                if years_ago <= 2:
+                    recency_score = 10.0
+                elif years_ago <= 5:
+                    recency_score = 7.0
+                elif years_ago <= 10:
+                    recency_score = 4.0
+                else:
+                    recency_score = 1.0
+                score += recency_score
+                reasons.append(f"Recent ({exp_date.year})")
 
         ranked.append(
             RankedAchievement(achievement=achievement, score=score, reasons=reasons)
@@ -615,7 +703,7 @@ def calculate_experience_score(
     """
     Calculate experience level match score (0-100).
 
-    Compares user's years of experience with job requirements.
+    Compares user's actual years of experience (from date ranges) with job requirements.
 
     Args:
         user_profile: User's profile
@@ -634,24 +722,15 @@ def calculate_experience_score(
     if required_years is None:
         return 100.0
 
-    # Calculate total years from experiences
-    # For simplicity, count the number of experiences as a proxy for years
-    # In a real implementation, you'd parse dates to get actual years
-    user_experience_count = len(user_profile.experiences)
+    actual_years = calculate_experience_years(user_profile.experiences)
 
-    # Rough heuristic: each experience is ~2 years
-    estimated_years = user_experience_count * 2
-
-    # Score based on how close user's experience is to requirement
-    if estimated_years >= required_years:
-        # Has required experience or more - full score
-        # Bonus decay for overqualification
-        if estimated_years > required_years * 2:
-            return 90.0  # Slightly penalize for being overqualified
+    if actual_years >= required_years:
+        # Has required experience or more - slight penalty for gross overqualification
+        if actual_years > required_years * 2.5:
+            return 90.0
         return 100.0
     else:
-        # Under-qualified: score proportional to requirement
-        return min((estimated_years / required_years) * 100, 100.0)
+        return min((actual_years / required_years) * 100, 100.0)
 
 
 def calculate_domain_score(
@@ -783,19 +862,39 @@ def calculate_match_score(
     if skill_matcher is None:
         skill_matcher = SkillMatcher()
 
-    # 1. Calculate Technical Skills Score (40% weight)
-    required_skills_percentage = skill_matcher.calculate_required_skills_match(
-        user_profile.skills, job_description.requirements.required_skills
+    # ----------------------------------------------------------------
+    # 1. Technical Skills Score (40% weight)
+    # Run match_skills ONCE per skill set and derive both the percentage
+    # and the detailed match objects from that single result.
+    # ----------------------------------------------------------------
+    matched_required, missing_required = skill_matcher.match_skills(
+        user_profile.skills,
+        job_description.requirements.required_skills,
+        category="required",
+    )
+    total_required = len(job_description.requirements.required_skills)
+    required_skills_percentage = (
+        int((len(matched_required) / total_required) * 100) if total_required else 100
     )
 
-    # Also check preferred skills
+    matched_preferred: list[SkillMatch] = []
+    missing_preferred: list[str] = []
     preferred_skills_percentage = 100.0
     if job_description.requirements.preferred_skills:
-        preferred_skills_percentage = skill_matcher.calculate_required_skills_match(
-            user_profile.skills, job_description.requirements.preferred_skills
+        matched_preferred, missing_preferred = skill_matcher.match_skills(
+            user_profile.skills,
+            job_description.requirements.preferred_skills,
+            category="preferred",
+        )
+        total_preferred = len(job_description.requirements.preferred_skills)
+        preferred_skills_percentage = (
+            int((len(matched_preferred) / total_preferred) * 100) if total_preferred else 100
         )
 
-    # Weighted average: required skills are more important (70/30)
+    # Combined matched skills with correct categories
+    matched_skills: list[SkillMatch] = matched_required + matched_preferred
+
+    # Weighted average: required skills carry more weight (70/30)
     technical_skills_score = (required_skills_percentage * 0.7) + (preferred_skills_percentage * 0.3)
 
     # 2. Calculate Experience Score (25% weight)
@@ -815,17 +914,6 @@ def calculate_match_score(
         (keyword_score * 0.15)
     )
 
-    # Get matched and missing skills
-    matched_skills, missing_required = skill_matcher.match_skills(
-        user_profile.skills, job_description.requirements.required_skills
-    )
-
-    missing_preferred: list[str] = []
-    if job_description.requirements.preferred_skills:
-        _, missing_preferred = skill_matcher.match_skills(
-            user_profile.skills, job_description.requirements.preferred_skills
-        )
-
     # Generate suggestions based on gaps
     suggestions = _generate_suggestions(
         missing_required=missing_required,
@@ -836,12 +924,15 @@ def calculate_match_score(
         keyword_score=keyword_score,
     )
 
-    # Rank achievements
+    # Rank achievements — build date lookup so recency scoring works
     all_achievements = []
+    achievement_dates: dict[str, str] = {}
     for exp in user_profile.experiences:
-        all_achievements.extend(exp.achievements)
+        for ach in exp.achievements:
+            all_achievements.append(ach)
+            achievement_dates[ach.text] = exp.start_date
 
-    ranked_achievements_list = rank_achievements(all_achievements, job_description, user_profile)
+    ranked_achievements_list = rank_achievements(all_achievements, job_description, achievement_dates)
     ranked_achievements_tuples = [
         (ra.achievement, ra.score) for ra in ranked_achievements_list
     ]

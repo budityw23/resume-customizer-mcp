@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from resume_customizer.core.ai_service import AIServiceError, get_ai_service
 from resume_customizer.core.customizer import (
     CustomizationPreferences,
     customize_resume,
@@ -18,9 +19,11 @@ from resume_customizer.core.exceptions import (
     ResumeCustomizerError,
     ValidationError,
 )
-from resume_customizer.core.matcher import calculate_match_score
+from resume_customizer.core.matcher import calculate_experience_years, calculate_match_score
+from resume_customizer.core.models import JobDescription, JobRequirements
 from resume_customizer.parsers.markdown_parser import parse_job_description, parse_resume
 from resume_customizer.storage.database import CustomizationDatabase
+from resume_customizer.utils.helpers import generate_id, get_timestamp
 from resume_customizer.utils.logger import get_logger
 from resume_customizer.utils.validation import (
     validate_file_path,
@@ -337,7 +340,7 @@ def handle_analyze_match(arguments: dict[str, Any]) -> dict[str, Any]:
                 "matched_skills_count": len(match_result.matched_skills),
                 "total_required_skills": len(match_result.missing_required_skills) + len(match_result.matched_skills),
             },
-            "matched_skills": match_result.matched_skills,
+            "matched_skills": [s.to_dict() for s in match_result.matched_skills],
             "matched_skills_count": len(match_result.matched_skills),
             "missing_required_skills": match_result.missing_required_skills,
             "missing_preferred_skills": match_result.missing_preferred_skills,
@@ -345,8 +348,9 @@ def handle_analyze_match(arguments: dict[str, Any]) -> dict[str, Any]:
             "top_achievements": [
                 {
                     "text": achievement.text,
-                    "score": score,
-                    "matched_keywords": achievement.matched_keywords if hasattr(achievement, 'matched_keywords') else [],
+                    "score": round(score, 1),
+                    "technologies": achievement.technologies,
+                    "metrics": achievement.metrics,
                 }
                 for achievement, score in match_result.ranked_achievements[:5]
             ],
@@ -369,20 +373,17 @@ def handle_customize_resume(arguments: dict[str, Any]) -> dict[str, Any]:
         Dictionary with customized resume data
     """
     match_id = arguments.get("match_id")
-    preferences_dict = arguments.get("preferences", {})
+    preferences_dict = arguments.get("preferences", {}) or {}
 
-    # Validate match_id
     if not match_id:
-        return {
-            "status": "error",
-            "message": "Missing required parameter: match_id",
-        }
+        return {"status": "error", "message": "Missing required parameter: match_id"}
 
     logger.info(f"Customizing resume: match={match_id}, preferences={preferences_dict}")
 
     try:
-        # Retrieve match result from session (try SessionManager first)
         session = _get_session_manager()
+
+        # Retrieve match result (SessionManager first, then legacy dict)
         match_result = session.get_match(match_id)
         if not match_result:
             match_result = _session_state["matches"].get(match_id)
@@ -392,9 +393,11 @@ def handle_customize_resume(arguments: dict[str, Any]) -> dict[str, Any]:
                 "message": f"Match not found: {match_id}. Please run analyze_match first.",
             }
 
-        # Retrieve profile from session state
+        # Retrieve profile (SessionManager first, then legacy dict)
         profile_id = match_result.profile_id
-        profile = _session_state["profiles"].get(profile_id)
+        profile = session.get_profile(profile_id)
+        if not profile:
+            profile = _session_state["profiles"].get(profile_id)
         if not profile:
             return {
                 "status": "error",
@@ -402,45 +405,123 @@ def handle_customize_resume(arguments: dict[str, Any]) -> dict[str, Any]:
             }
 
         # Parse preferences
-        preferences = None
-        if preferences_dict:
-            preferences = CustomizationPreferences(
-                achievements_per_role=preferences_dict.get("achievements_per_role", 3),
-                max_skills=preferences_dict.get("max_skills"),
-                template=preferences_dict.get("template", "modern"),
-                include_summary=preferences_dict.get("include_summary", True),
-            )
+        preferences_obj = CustomizationPreferences(
+            achievements_per_role=preferences_dict.get("max_achievements_per_role", 3),
+            max_skills=preferences_dict.get("max_skills"),
+            template=preferences_dict.get("template", "modern"),
+            include_summary=preferences_dict.get("include_summary", True),
+            summary_style=preferences_dict.get("summary_style", "balanced"),
+            drop_irrelevant_experiences=preferences_dict.get("drop_irrelevant_experiences", False),
+        )
 
-        # Customize resume using the core logic
+        # Customize resume (achievement reordering + skills optimization)
         customized_resume = customize_resume(
             user_profile=profile,
             match_result=match_result,
-            preferences=preferences,
+            preferences=preferences_obj,
         )
 
-        # Store in session using SessionManager
-        session = _get_session_manager()
-        session.set_customization(
-            customized_resume.customization_id, customized_resume
-        )
+        # ----------------------------------------------------------------
+        # Wire AI: generate a job-tailored professional summary
+        # ----------------------------------------------------------------
+        if preferences_obj.include_summary:
+            try:
+                ai = get_ai_service()
 
-        # Also keep in legacy dict for backward compatibility
-        _session_state["customizations"][
-            customized_resume.customization_id
-        ] = customized_resume
+                # Retrieve job for context
+                job = session.get_job(customized_resume.job_id)
+                if not job:
+                    job = _session_state["jobs"].get(customized_resume.job_id)
 
-        # Also store in database
+                # Build profile context for summary generation
+                top_achievements: list[str] = []
+                for exp in customized_resume.selected_experiences[:2]:
+                    for ach in exp.achievements[:2]:
+                        top_achievements.append(ach.text)
+
+                experience_years = calculate_experience_years(profile.experiences)
+                current_title = (
+                    profile.experiences[0].title if profile.experiences else "Professional"
+                )
+
+                profile_ctx: dict[str, Any] = {
+                    "top_skills": [s.name for s in customized_resume.reordered_skills[:5]],
+                    "experience_years": max(1, int(experience_years)),
+                    "top_achievements": top_achievements,
+                    "current_title": current_title,
+                    "domain": str(profile.preferences.get("domain", "")),
+                }
+
+                job_ctx: dict[str, Any] | None = None
+                if job:
+                    job_ctx = {
+                        "title": job.title,
+                        "company": job.company,
+                        "key_requirements": job.requirements.required_skills[:5],
+                        "industry": job.experience_level or "",
+                    }
+
+                summary_result = ai.generate_custom_summary(
+                    profile_context=profile_ctx,
+                    job_context=job_ctx,
+                    style=preferences_obj.summary_style,
+                )
+                customized_resume.customized_summary = summary_result["summary"]
+                logger.info("AI-generated customized summary applied")
+
+            except (AIServiceError, Exception) as ai_err:
+                logger.warning(f"AI summary generation skipped: {ai_err}")
+
+        # ----------------------------------------------------------------
+        # Wire AI: rephrase achievements to better match the job
+        # ----------------------------------------------------------------
         try:
-            # Get job info for database
-            job = _session_state["jobs"].get(customized_resume.job_id)
+            ai = get_ai_service()
+
+            job = session.get_job(customized_resume.job_id)
+            if not job:
+                job = _session_state["jobs"].get(customized_resume.job_id)
+
+            job_keywords: list[str] = []
+            if job:
+                job_keywords = (
+                    job.requirements.required_skills[:5]
+                    + job.requirements.preferred_skills[:3]
+                    + job.keywords.technical[:5]
+                )
+
+            for exp in customized_resume.selected_experiences:
+                for ach in exp.achievements:
+                    try:
+                        result = ai.rephrase_achievement(
+                            achievement=ach.text,
+                            job_keywords=job_keywords,
+                            style="balanced",
+                            use_cache=True,
+                        )
+                        ach.rephrased_text = result["rephrased"]
+                    except Exception:
+                        pass  # Keep original if individual rephrasing fails
+
+            logger.info("Achievement rephrasing completed")
+
+        except (AIServiceError, Exception) as ai_err:
+            logger.warning(f"Achievement rephrasing skipped: {ai_err}")
+
+        # ----------------------------------------------------------------
+        # Store in session and database
+        # ----------------------------------------------------------------
+        session.set_customization(customized_resume.customization_id, customized_resume)
+        _session_state["customizations"][customized_resume.customization_id] = customized_resume
+
+        try:
+            job = session.get_job(customized_resume.job_id)
+            if not job:
+                job = _session_state["jobs"].get(customized_resume.job_id)
             job_title = job.title if job else "Unknown"
             company = job.company if job else "Unknown"
+            overall_score = customized_resume.match_result.overall_score
 
-            # Get match result for overall score
-            match_result = customized_resume.match_result
-            overall_score = match_result.overall_score if match_result else 0
-
-            # Ensure customization_id is not None
             customization_id = customized_resume.customization_id
             if not customization_id:
                 raise ValueError("Customization ID is required")
@@ -460,16 +541,15 @@ def handle_customize_resume(arguments: dict[str, Any]) -> dict[str, Any]:
             )
             logger.info(f"Saved customization to database: {customized_resume.customization_id}")
         except Exception as db_error:
-            # Don't fail the customization if database save fails
-            logger.warning(f"Failed to save customization to database: {str(db_error)}")
+            logger.warning(f"Failed to save customization to database: {db_error}")
 
         logger.info(
-            f"Resume customized successfully: {customized_resume.customization_id} - "
+            f"Resume customized: {customized_resume.customization_id} — "
             f"{len(customized_resume.selected_experiences)} experiences, "
-            f"{len(customized_resume.reordered_skills)} skills"
+            f"{len(customized_resume.reordered_skills)} skills, "
+            f"summary={'yes' if customized_resume.customized_summary else 'no'}"
         )
 
-        # Format response
         return {
             "status": "success",
             "message": f"Resume customized successfully for {profile.name}",
@@ -481,28 +561,114 @@ def handle_customize_resume(arguments: dict[str, Any]) -> dict[str, Any]:
             "template": customized_resume.template,
             "experiences_count": len(customized_resume.selected_experiences),
             "skills_count": len(customized_resume.reordered_skills),
-            "include_summary": customized_resume.customized_summary is not None,
-            "metadata": {
-                "changes_count": customized_resume.metadata.get("changes_count", 0),
-                "achievements_reordered": customized_resume.metadata.get("achievements_reordered", 0),
-                "skills_reordered": customized_resume.metadata.get("skills_reordered", 0),
-            },
-            "changes_summary": customized_resume.metadata.get("changes_log", {}),  # Full changes log
+            "has_ai_summary": customized_resume.customized_summary is not None,
+            "achievements_rephrased": sum(
+                1
+                for exp in customized_resume.selected_experiences
+                for ach in exp.achievements
+                if ach.rephrased_text
+            ),
+            "changes_summary": customized_resume.metadata.get("changes_log", {}),
         }
 
     except ValueError as e:
-        # Handle validation errors (e.g., fabricated achievements/skills)
-        logger.error(f"Validation error customizing resume: {str(e)}")
-        return {
-            "status": "error",
-            "message": f"Validation error: {str(e)}",
-        }
+        logger.error(f"Validation error customizing resume: {e}")
+        return {"status": "error", "message": f"Validation error: {e}"}
     except Exception as e:
-        logger.error(f"Error customizing resume: {str(e)}")
+        logger.error(f"Error customizing resume: {e}")
+        return {"status": "error", "message": f"Error customizing resume: {e}"}
+
+
+def handle_analyze_job_from_text(arguments: dict[str, Any]) -> dict[str, Any]:
+    """
+    Handle analyze_job_from_text tool call.
+
+    Accepts raw job description text, uses AI to extract structured data,
+    and returns a job_id for use with analyze_match.
+
+    Args:
+        arguments: Tool arguments with 'text'
+
+    Returns:
+        Dictionary with job_id and parsed job details
+    """
+    raw_text = (arguments.get("text") or "").strip()
+    if not raw_text:
+        return {"status": "error", "message": "Missing required parameter: text"}
+
+    logger.info(f"Parsing job from text ({len(raw_text)} chars)")
+
+    try:
+        ai = get_ai_service()
+        parsed = ai.parse_job_from_text(raw_text)
+
+        job = JobDescription(
+            title=parsed.get("title") or "Unknown",
+            company=parsed.get("company") or "Unknown",
+            location=parsed.get("location"),
+            job_type=parsed.get("job_type"),
+            experience_level=parsed.get("experience_level"),
+            salary_range=parsed.get("salary_range"),
+            description=parsed.get("description", ""),
+            responsibilities=parsed.get("responsibilities", []),
+            requirements=JobRequirements(
+                required_skills=parsed.get("required_skills", []),
+                preferred_skills=parsed.get("preferred_skills", []),
+                required_experience_years=parsed.get("required_experience_years"),
+                required_education=parsed.get("required_education"),
+            ),
+            technical_stack=parsed.get("technical_stack", []),
+            company_description=parsed.get("company_description"),
+            job_id=generate_id("job"),
+            created_at=get_timestamp(),
+        )
+
+        # Store in session
+        session = _get_session_manager()
+        session.set_job(job.job_id, job)
+        _session_state["jobs"][job.job_id] = job
+
+        # Save to database
+        try:
+            db = _get_database()
+            db.insert_job(
+                job_id=job.job_id,
+                title=job.title,
+                company=job.company,
+                full_data=job.to_dict(),
+                location=job.location,
+                job_type=job.job_type,
+                experience_level=job.experience_level,
+                salary_range=job.salary_range,
+                required_skills_count=len(job.requirements.required_skills),
+                preferred_skills_count=len(job.requirements.preferred_skills),
+                created_at=job.created_at,
+            )
+        except Exception as db_err:
+            logger.warning(f"Failed to save job to database: {db_err}")
+
+        logger.info(f"Job parsed from text: {job.job_id} — {job.title} at {job.company}")
+
         return {
-            "status": "error",
-            "message": f"Error customizing resume: {str(e)}",
+            "status": "success",
+            "message": f"Job description parsed: {job.title} at {job.company}",
+            "job_id": job.job_id,
+            "title": job.title,
+            "company": job.company,
+            "location": job.location,
+            "experience_level": job.experience_level,
+            "required_skills": job.requirements.required_skills,
+            "preferred_skills": job.requirements.preferred_skills,
+            "required_skills_count": len(job.requirements.required_skills),
+            "preferred_skills_count": len(job.requirements.preferred_skills),
+            "required_experience_years": job.requirements.required_experience_years,
         }
+
+    except AIServiceError as e:
+        return {"status": "error", "message": f"AI parsing failed: {e}"}
+    except Exception as e:
+        logger.error(f"Error parsing job from text: {e}")
+        return {"status": "error", "message": f"Error parsing job: {e}"}
 
 
 def handle_generate_resume_files(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -657,6 +823,7 @@ def handle_list_customizations(arguments: dict[str, Any]) -> dict[str, Any]:
 TOOL_HANDLERS: dict[str, Any] = {
     "load_user_profile": handle_load_user_profile,
     "load_job_description": handle_load_job_description,
+    "analyze_job_from_text": handle_analyze_job_from_text,
     "analyze_match": handle_analyze_match,
     "customize_resume": handle_customize_resume,
     "generate_resume_files": handle_generate_resume_files,

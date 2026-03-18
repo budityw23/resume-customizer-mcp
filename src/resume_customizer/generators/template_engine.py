@@ -117,7 +117,8 @@ def _prepare_template_context(
             "dates": _format_date_range(exp.start_date, exp.end_date),
             "achievements": [
                 {
-                    "text": ach.text,
+                    "text": ach.rephrased_text or ach.text,
+                    "original_text": ach.text,
                     "technologies": ach.technologies,
                     "metrics": ach.metrics,
                 }
