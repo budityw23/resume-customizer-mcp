@@ -32,6 +32,19 @@ class ContactInfo:
             "other": self.other,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ContactInfo":
+        """Create a ContactInfo from a dictionary."""
+        return cls(
+            email=data["email"],
+            phone=data.get("phone"),
+            location=data.get("location"),
+            linkedin=data.get("linkedin"),
+            github=data.get("github"),
+            portfolio=data.get("portfolio"),
+            other=data.get("other", {}),
+        )
+
 
 @dataclass
 class Achievement:
@@ -50,6 +63,16 @@ class Achievement:
             "metrics": self.metrics,
             "relevance_score": self.relevance_score,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Achievement":
+        """Create an Achievement from a dictionary."""
+        return cls(
+            text=data["text"],
+            technologies=data.get("technologies", []),
+            metrics=data.get("metrics", []),
+            relevance_score=data.get("relevance_score", 0.0),
+        )
 
 
 @dataclass
@@ -80,6 +103,21 @@ class Experience:
             "technologies": self.technologies,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Experience":
+        """Create an Experience from a dictionary."""
+        return cls(
+            company=data["company"],
+            title=data["title"],
+            start_date=data["start_date"],
+            end_date=data["end_date"],
+            location=data.get("location"),
+            work_mode=data.get("work_mode"),
+            description=data.get("description"),
+            achievements=[Achievement.from_dict(a) for a in data.get("achievements", [])],
+            technologies=data.get("technologies", []),
+        )
+
 
 @dataclass
 class Skill:
@@ -100,6 +138,17 @@ class Skill:
             "years": self.years,
             "description": self.description,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Skill":
+        """Create a Skill from a dictionary."""
+        return cls(
+            name=data["name"],
+            category=data.get("category", "General"),
+            proficiency=data.get("proficiency"),
+            years=data.get("years"),
+            description=data.get("description"),
+        )
 
 
 @dataclass
@@ -124,6 +173,18 @@ class Education:
             "details": self.details,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Education":
+        """Create an Education from a dictionary."""
+        return cls(
+            degree=data["degree"],
+            institution=data["institution"],
+            graduation_year=data.get("graduation_year"),
+            gpa=data.get("gpa"),
+            location=data.get("location"),
+            details=data.get("details", []),
+        )
+
 
 @dataclass
 class Certification:
@@ -147,6 +208,18 @@ class Certification:
             "url": self.url,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Certification":
+        """Create a Certification from a dictionary."""
+        return cls(
+            name=data["name"],
+            issuer=data["issuer"],
+            date=data.get("date"),
+            expiry=data.get("expiry"),
+            credential_id=data.get("credential_id"),
+            url=data.get("url"),
+        )
+
 
 @dataclass
 class Project:
@@ -169,6 +242,18 @@ class Project:
             "github": self.github,
             "highlights": self.highlights,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "Project":
+        """Create a Project from a dictionary."""
+        return cls(
+            name=data["name"],
+            description=data["description"],
+            technologies=data.get("technologies", []),
+            url=data.get("url"),
+            github=data.get("github"),
+            highlights=data.get("highlights", []),
+        )
 
 
 @dataclass
@@ -203,6 +288,23 @@ class UserProfile:
             "created_at": self.created_at,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "UserProfile":
+        """Create a UserProfile from a dictionary."""
+        return cls(
+            name=data["name"],
+            contact=ContactInfo.from_dict(data["contact"]),
+            summary=data["summary"],
+            experiences=[Experience.from_dict(e) for e in data.get("experiences", [])],
+            skills=[Skill.from_dict(s) for s in data.get("skills", [])],
+            education=[Education.from_dict(e) for e in data.get("education", [])],
+            certifications=[Certification.from_dict(c) for c in data.get("certifications", [])],
+            projects=[Project.from_dict(p) for p in data.get("projects", [])],
+            preferences=data.get("preferences", {}),
+            profile_id=data.get("profile_id"),
+            created_at=data.get("created_at"),
+        )
+
 
 @dataclass
 class JobRequirements:
@@ -224,6 +326,17 @@ class JobRequirements:
             "other_requirements": self.other_requirements,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "JobRequirements":
+        """Create a JobRequirements from a dictionary."""
+        return cls(
+            required_skills=data.get("required_skills", []),
+            preferred_skills=data.get("preferred_skills", []),
+            required_experience_years=data.get("required_experience_years"),
+            required_education=data.get("required_education"),
+            other_requirements=data.get("other_requirements", []),
+        )
+
 
 @dataclass
 class JobKeywords:
@@ -242,6 +355,16 @@ class JobKeywords:
             "soft_skills": self.soft_skills,
             "all_keywords": self.all_keywords,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "JobKeywords":
+        """Create a JobKeywords from a dictionary."""
+        return cls(
+            technical=data.get("technical", []),
+            domain=data.get("domain", []),
+            soft_skills=data.get("soft_skills", []),
+            all_keywords=data.get("all_keywords", []),
+        )
 
 
 @dataclass
@@ -286,6 +409,28 @@ class JobDescription:
             "created_at": self.created_at,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "JobDescription":
+        """Create a JobDescription from a dictionary."""
+        return cls(
+            title=data["title"],
+            company=data["company"],
+            location=data.get("location"),
+            job_type=data.get("job_type"),
+            experience_level=data.get("experience_level"),
+            salary_range=data.get("salary_range"),
+            description=data.get("description", ""),
+            responsibilities=data.get("responsibilities", []),
+            requirements=JobRequirements.from_dict(data.get("requirements", {})),
+            technical_stack=data.get("technical_stack", []),
+            keywords=JobKeywords.from_dict(data.get("keywords", {})),
+            company_description=data.get("company_description"),
+            apply_url=data.get("apply_url"),
+            posted_date=data.get("posted_date"),
+            job_id=data.get("job_id"),
+            created_at=data.get("created_at"),
+        )
+
 
 @dataclass
 class SkillMatch:
@@ -304,6 +449,16 @@ class SkillMatch:
             "category": self.category,
             "user_proficiency": self.user_proficiency,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SkillMatch":
+        """Create a SkillMatch from a dictionary."""
+        return cls(
+            skill=data["skill"],
+            matched=data["matched"],
+            category=data["category"],
+            user_proficiency=data.get("user_proficiency"),
+        )
 
 
 @dataclass
@@ -325,6 +480,17 @@ class MatchBreakdown:
             "keyword_coverage_score": self.keyword_coverage_score,
             "total_score": self.total_score,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MatchBreakdown":
+        """Create a MatchBreakdown from a dictionary."""
+        return cls(
+            technical_skills_score=data["technical_skills_score"],
+            experience_score=data["experience_score"],
+            domain_score=data["domain_score"],
+            keyword_coverage_score=data["keyword_coverage_score"],
+            total_score=data["total_score"],
+        )
 
 
 @dataclass
@@ -359,6 +525,29 @@ class MatchResult:
             "created_at": self.created_at,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MatchResult":
+        """Create a MatchResult from a dictionary.
+
+        Note: ranked_achievements stores tuples serialised as [dict, float] pairs.
+        """
+        ranked: list[tuple[Achievement, float]] = [
+            (Achievement.from_dict(ach), float(score))
+            for ach, score in data.get("ranked_achievements", [])
+        ]
+        return cls(
+            profile_id=data["profile_id"],
+            job_id=data["job_id"],
+            overall_score=data["overall_score"],
+            breakdown=MatchBreakdown.from_dict(data["breakdown"]),
+            matched_skills=[SkillMatch.from_dict(s) for s in data.get("matched_skills", [])],
+            missing_required_skills=data.get("missing_required_skills", []),
+            missing_preferred_skills=data.get("missing_preferred_skills", []),
+            suggestions=data.get("suggestions", []),
+            ranked_achievements=ranked,
+            created_at=data.get("created_at"),
+        )
+
 
 @dataclass
 class CustomizedResume:
@@ -389,3 +578,19 @@ class CustomizedResume:
             "customization_id": self.customization_id,
             "created_at": self.created_at,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CustomizedResume":
+        """Create a CustomizedResume from a dictionary."""
+        return cls(
+            profile_id=data["profile_id"],
+            job_id=data["job_id"],
+            match_result=MatchResult.from_dict(data["match_result"]),
+            customized_summary=data.get("customized_summary"),
+            selected_experiences=[Experience.from_dict(e) for e in data.get("selected_experiences", [])],
+            reordered_skills=[Skill.from_dict(s) for s in data.get("reordered_skills", [])],
+            template=data.get("template", "modern"),
+            metadata=data.get("metadata", {}),
+            customization_id=data.get("customization_id"),
+            created_at=data.get("created_at"),
+        )

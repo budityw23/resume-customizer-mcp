@@ -26,7 +26,6 @@ load_dotenv()
 # Try to import spaCy for fallback keyword extraction
 try:
     import spacy
-    from spacy.language import Language
 
     SPACY_AVAILABLE = True
 except ImportError:
@@ -518,12 +517,12 @@ Only return the JSON object, no other text."""
             # Load spaCy model
             try:
                 nlp = spacy.load("en_core_web_sm")
-            except OSError:
+            except OSError as e:
                 logger.error(
                     "spaCy model 'en_core_web_sm' not found. "
                     "Run: python -m spacy download en_core_web_sm"
                 )
-                raise AIServiceError("spaCy model not installed")
+                raise AIServiceError("spaCy model not installed") from e
 
             doc = nlp(text)
 
